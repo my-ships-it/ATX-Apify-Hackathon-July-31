@@ -126,7 +126,7 @@ h1 {
   left: 50%;
   bottom: 18px;
   transform: translateX(-50%);
-  color: #ecf0ff;
+  color: #f5ede0;
   border-radius: var(--radius-card);
   border: 1px solid rgba(245, 158, 11, 0.28);
   background: rgba(15, 15, 17, 0.72);
@@ -622,7 +622,7 @@ input[type='range']:focus-visible::-moz-range-track {
 }
 
 .scan-step.active .scan-dot {
-  background: #c0c9ff;
+  background: #e6c98a;
   box-shadow: 0 0 0 6px rgba(251, 113, 133, 0.18);
   animation: pulseDot 1.05s ease-in-out infinite;
 }
@@ -668,7 +668,7 @@ input[type='range']:focus-visible::-moz-range-track {
 
 .top-signals h3 {
   margin: 0;
-  color: #c7d2ff;
+  color: #d8b788;
   font-size: 0.88rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -745,13 +745,13 @@ input[type='range']:focus-visible::-moz-range-track {
 
 .top-signal-score span {
   font-size: 0.82rem;
-  color: #dce1ff;
+  color: #e9dcc8;
   justify-self: end;
 }
 
 .top-signal-score-value {
   font-size: 0.9rem !important;
-  color: #f0f6ff !important;
+  color: #f5ede0 !important;
   font-weight: 700;
   justify-self: end;
   font-variant-numeric: tabular-nums;
@@ -766,7 +766,7 @@ input[type='range']:focus-visible::-moz-range-track {
 }
 
 .mini-reason {
-  color: #bcc9f0;
+  color: #c9b9a3;
   max-width: 250px;
   white-space: nowrap;
   overflow: hidden;
@@ -895,7 +895,7 @@ input[type='range']:focus-visible::-moz-range-track {
   padding: 5px 10px;
   font-size: 0.74rem;
   font-weight: 700;
-  color: #ecf0ff;
+  color: #f5ede0;
 }
 
 .rail-count-pill .trend-chip {
@@ -988,7 +988,7 @@ input[type='range']:focus-visible::-moz-range-track {
 
 .official-sources h3 {
   margin: 0;
-  color: #c7d2ff;
+  color: #d8b788;
   font-size: 0.88rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -1293,7 +1293,7 @@ button:focus-visible {
 }
 
 .trend-flat {
-  color: #c6d2ff;
+  color: #d8b788;
   background: rgba(245, 158, 11, 0.2);
   border-color: rgba(245, 158, 11, 0.45);
 }
@@ -1355,7 +1355,7 @@ button:focus-visible {
 
 .signal-score-block strong {
   font-size: 1.05rem;
-  color: #f0f6ff;
+  color: #f5ede0;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
@@ -1423,7 +1423,7 @@ button:focus-visible {
 .blue {
   background: rgba(203, 180, 255, 0.16);
   border-color: rgba(203, 180, 255, 0.38);
-  color: #cfbeff;
+  color: #e3cba3;
 }
 
 .confidence {
@@ -1509,7 +1509,7 @@ button:focus-visible {
   right: 0;
   text-align: center;
   font-size: 0.74rem;
-  color: #ecf0ff;
+  color: #f5ede0;
   font-weight: 700;
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
 }
@@ -1517,7 +1517,7 @@ button:focus-visible {
 .confidence-legend {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  color: #b7c3ee;
+  color: #c9b9a3;
   font-size: 0.74rem;
   text-align: center;
   gap: 8px;
@@ -1668,12 +1668,12 @@ button:focus-visible {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 0.68rem;
-  color: #7a84b0;
+  color: #9c8f7c;
   white-space: nowrap;
 }
 
 .terminal-line-es {
-  color: #f3a9c6;
+  color: #d99a6c;
 }
 
 .terminal-line-scan {
@@ -1681,7 +1681,7 @@ button:focus-visible {
 }
 
 .terminal-line-error {
-  color: #ffb9bd;
+  color: #f28b7a;
 }
 
 .terminal-line-info {
@@ -1727,7 +1727,7 @@ button:focus-visible {
 }
 
 .raw-expand summary:hover {
-  color: #c8deff;
+  color: #e0c9a6;
 }
 
 .empty {
@@ -1869,7 +1869,7 @@ a:hover {
 @keyframes sliderValuePop {
   0% {
     transform: translateY(0) scale(1);
-    color: #f2f7ff;
+    color: #fff6e6;
   }
   50% {
     transform: translateY(-1px) scale(1.05);
@@ -1878,7 +1878,7 @@ a:hover {
   }
   100% {
     transform: translateY(0) scale(1);
-    color: #d8e2ff;
+    color: #ffebc2;
   }
 }
 
@@ -2069,7 +2069,7 @@ a:hover {
 }
 
 .ticker-label {
-  color: #acb8f0;
+  color: #d8b788;
   font-size: 0.67rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -2081,7 +2081,7 @@ a:hover {
 .ticker-value {
   justify-self: end;
   text-align: right;
-  color: #ecf2ff;
+  color: #f5ede0;
 }
 
 .ticker-value strong {
