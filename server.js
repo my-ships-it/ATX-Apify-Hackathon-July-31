@@ -242,7 +242,12 @@ let autoScanRunning = false;
 function broadcastEvent(event, data) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const client of sseClients) {
-    client.write(payload);
+    try {
+      client.write(payload);
+    } catch (error) {
+      // A dead/closed browser tab shouldn't be able to crash the whole server mid-demo.
+      sseClients.delete(client);
+    }
   }
 }
 
@@ -1127,6 +1132,7 @@ app.get('/api/events', (req, res) => {
   res.write(`event: connected\ndata: ${JSON.stringify({ autoScanEnabled: Boolean(autoScanTimer), autoScanIntervalMs })}\n\n`);
 
   sseClients.add(res);
+  res.on('error', () => sseClients.delete(res));
   req.on('close', () => {
     sseClients.delete(res);
   });
