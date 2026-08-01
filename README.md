@@ -42,9 +42,9 @@ Hackathon version focused on **Apify + Elasticsearch** with a spicy demo angle:
 4. Point judges to confidence reasoning and match lag.
 
 ## Key endpoints
-- `GET /api/health` — environment + Elasticsearch status
-- `GET /api/latest` — most recent signals + raw feed
-- `POST /api/scan` — performs scraping + indexing + matching + scoring
+- `GET /api/health`: environment and Elasticsearch status
+- `GET /api/latest`: most recent signals plus the raw feed
+- `POST /api/scan`: runs the scrape, index, match, and score pipeline
 
 ## Scoring controls (optional, for tune-in seconds)
 - `RUMOR_CONFIRM_THRESHOLD` default `48`
@@ -54,7 +54,7 @@ Hackathon version focused on **Apify + Elasticsearch** with a spicy demo angle:
 - `ES_RRF_TOP` default `5`
 
 ## One-liner for the judge demo
-"The app doesn’t just show keyword hits — it explains *why* rumor chatter gets promoted into likely/reality signals by combining semantic retrieval, exact overlap, and timing lag directly inside Elasticsearch."
+"The app doesn't just show keyword hits. It explains why rumor chatter gets promoted to likely or confirmed, by combining semantic search, exact overlap, and timing, all inside Elasticsearch."
 
 ## Submission pack
 - Full submission notes and Airtable-ready copy: [SUBMISSION.md](SUBMISSION.md)

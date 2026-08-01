@@ -1,76 +1,51 @@
-# Submission pack — Rumor → Reality Launch Radar
+# Submission pack: Rumor → Reality Launch Radar
 
 ## Public repo
 https://github.com/my-ships-it/ATX-Apify-Hackathon-July-31
 
 ## Project description
-Rumor → Reality Launch Radar is a live launch-intelligence cockpit for noisy startup ecosystems.  
-It continuously scrapes rumor-like social chatter and official communications for a target list, indexes everything in Elasticsearch, and turns ambiguous signals into ranked launch status buckets (confirmed / likely / watching) with explicit evidence links.
+Rumor → Reality Launch Radar keeps an eye on noisy startup news for you. It scrapes rumor-style social chatter and official company communications for a list of companies, indexes all of it in Elasticsearch, and sorts the messy signal into three clear buckets: confirmed, likely, and watching. Every result links back to the actual evidence behind it.
 
-## Why / how we used Apify + Elasticsearch
-- **Apify Twitter Scraper (`danek~twitter-scraper`)** — rumor-tier social chatter per company.
-- **Apify LinkedIn Post Search (`harvestapi~linkedin-post-search`)** — social "official" signal.
-- **Apify Website Content Crawler (`apify~website-content-crawler`)** — a *third* evidence tier:
-  crawls each company's actual official newsroom/blog (openai.com/news, anthropic.com/news,
-  stripe.com/newsroom). This is a materially stronger "reality" signal than a random social post —
-  a real press release, not just someone's take on it.
-- **Elasticsearch (Serverless)** — single index, hybrid retrieval:
-  1. BM25 keyword matching (`multi_match` on title/text),
-  2. semantic matching via a `semantic_text` field (dense embeddings, no manual vectorization),
-  3. combined with a **Reciprocal Rank Fusion (RRF) retriever** — not just concatenated results.
-- **Elasticsearch aggregations (`/api/trends`)** — `date_histogram` for rumor volume over time,
-  `change_point` aggregation to auto-detect momentum shifts (spike/dip/trend_change) in rumor
-  volume, and `significant_text` to surface trending rumor language vs. background frequency.
-- **ES|QL (`/api/esql`)** — a distinct query surface (Elasticsearch's piped query language, not the
-  DSL) computing a live company leaderboard: `FROM ... | WHERE ... | EVAL ... | STATS ... BY company`.
-- **Elasticsearch percolator** — rumors are registered as *stored queries* in a percolator index;
-  as new official docs arrive we ask Elasticsearch in reverse "which rumors does this satisfy?"
-  instead of only forward-searching from rumor → official. Surfaces as an independent
-  `percolatorConfirmed` cross-check on each signal, with a small confidence boost when it agrees
-  with the forward RRF match.
-- **Live radar (Server-Sent Events)** — an opt-in background auto-scan loop (`/api/autoscan`) that
-  re-scans on an interval, diffs signal status against the previous run, and pushes real-time
-  `alert` events over SSE the instant a rumor flips watching → likely → confirmed. The UI shows
-  toast notifications live, no page reload.
+## Why and how we used Apify and Elasticsearch
+- **Apify Twitter Scraper** (`danek~twitter-scraper`) pulls in the rumor-level social chatter for each company.
+- **Apify LinkedIn Post Search** (`harvestapi~linkedin-post-search`) pulls in social posts from official company accounts.
+- **Apify Website Content Crawler** (`apify~website-content-crawler`) adds a third, stronger tier of evidence. It crawls each company's actual newsroom or blog (openai.com/news, anthropic.com/news, stripe.com/newsroom), so we're checking against a real press release, not just someone's take on one.
+- **Elasticsearch Serverless** runs hybrid search on one index: keyword matching (BM25 on title and text), semantic matching through a `semantic_text` field (no manual embedding work needed), and a Reciprocal Rank Fusion (RRF) retriever that blends both instead of just showing two separate result lists.
+- **Elasticsearch aggregations** power `/api/trends`: a `date_histogram` for rumor volume over time, a `change_point` aggregation that flags when a company's rumor volume actually spikes or shifts, and `significant_text` to surface which words are showing up more than usual.
+- **ES|QL** powers `/api/esql`, a separate query style (Elasticsearch's piped query language) that builds a live leaderboard of company activity straight from a `FROM ... | WHERE ... | EVAL ... | STATS ... BY company` query.
+- **Elasticsearch percolator** flips the usual search around. Rumors get stored as saved queries, and when a new official post comes in, we ask Elasticsearch which rumors it satisfies, instead of only searching forward from rumor to evidence. This shows up as an independent check on each signal, and gives a small confidence boost when it agrees with the main match.
+- **Live radar** is an optional background loop (`/api/autoscan`, over Server-Sent Events) that rescans on a timer, compares each signal's status to the previous run, and pushes a live alert the instant something moves from watching to likely to confirmed. No page reload needed.
 
-## Differentiator vs generic “scrape + search” demos
-- **Three-tier evidence, not two**: social rumor → social "official" → actual company press release.
-- **Two distinct Elasticsearch query surfaces** (DSL aggregations + ES|QL) plus a **percolator**
-  reverse-search cross-check — most hackathon Elastic integrations stop at one `_search` call.
-- **Momentum detection**, not just a static snapshot: `change_point` aggregation flags when rumor
-  volume for a company actually shifts.
-- **It's live**: SSE-pushed alerts the moment a rumor gets confirmed, not just a manual refresh.
-- Full explainability in the UI: every signal has reason snippets and linked matched evidence.
-- Polished decision rail / executive summary layer for business-readable output, not raw data.
+## What makes this different from a typical "scrape and search" demo
+- Three tiers of evidence instead of two: social rumor, social "official" post, and an actual company press release.
+- Two different Elasticsearch query styles (aggregations and ES|QL), plus a percolator doing reverse matching. Most hackathon Elastic projects stop at a single search call.
+- Real momentum detection, not just a static count: the `change_point` aggregation flags when a company's rumor volume genuinely shifts.
+- It's live: alerts push over SSE the moment a rumor gets confirmed, no manual refresh needed.
+- Every signal shows its reasoning in plain terms, with links to the matching evidence.
+- The interface is built to be read by a person making a decision, not just a table of raw data.
 
 ## Live links
 - App: https://rumor-radar-web-production.up.railway.app
 - API health: https://rumor-radar-web-production.up.railway.app/api/health
-- Latest snapshot: https://rumor-radar-web-production.up.railway.app/api/latest
+- Latest results: https://rumor-radar-web-production.up.railway.app/api/latest
 
 ## Quick demo script (90 seconds)
-1. Open the app and click **Health check**; confirm Elasticsearch is healthy.
-2. Click **Run scan** (first cold run takes ~2-5 min — 3 companies × 3 Apify sources, including a
-   real website crawl of each company's official blog).
-3. Signal board fills. Filter with **Confirmed** / **Likely** / **Watching**.
-4. Open the top card in **Signal spotlight** and read: status, confidence, "why this matched"
-   reasons, and the linked official evidence (note when it's a company blog post, not just a
-   social post).
-5. Scroll to **Market signals** — point out the `date_histogram` volume sparkline, the
-   `change_point` momentum callout, and `significant_text` trending terms — all live Elasticsearch
-   aggregations, not client-side math.
-6. Hit `/api/esql` directly (or the panel) to show the ES|QL leaderboard query in plain text.
-7. Toggle **Live radar** on, then trigger a scan from another tab/device — watch a toast alert
-   arrive over SSE the moment a signal flips status, with zero page reload.
+1. Open the app and click **Health check** to confirm Elasticsearch is up.
+2. Click **Run scan** (the first cold run takes about 2 to 5 minutes: 3 companies across 3 Apify sources, including a real crawl of each company's blog).
+3. The signal board fills in. Filter by **Confirmed**, **Likely**, or **Watching**.
+4. Open the top card in **Signal spotlight** and walk through its status, confidence score, the reasons it matched, and the linked evidence (point out when it's a real company blog post, not just a social post).
+5. Scroll to **Trends behind the numbers** and point out the rumor volume chart, the sudden-change callout, and the trending words, all computed live by Elasticsearch, not in the browser.
+6. Hit `/api/esql` directly (or use the panel) to show the ES|QL leaderboard query in plain text.
+7. Turn on **Live radar**, then trigger a scan from another tab or device. Watch a toast alert arrive over SSE the moment a signal changes status, with no reload.
 
-## Airtable-ready text (copy/paste)
+## Airtable-ready text (copy and paste)
 
-**Description:**  
-Rumor → Reality Launch Radar ingests rumor signals (Twitter), social "official" signals (LinkedIn), and real official press releases (crawled company blogs) via Apify, indexes them in Elasticsearch, and classifies each rumor as Confirmed / Likely / Watching using a hybrid BM25 + semantic RRF retriever, cross-checked against an independent Elasticsearch percolator reverse-match. A live SSE radar pushes real-time alerts the instant a rumor gets confirmed.
+**Description:**
+Rumor → Reality Launch Radar pulls in rumor signals from Twitter, social "official" posts from LinkedIn, and real official press releases crawled from company blogs, all through Apify. It indexes everything in Elasticsearch and sorts each rumor into Confirmed, Likely, or Watching using a hybrid search (keyword plus semantic, combined with RRF), double-checked against an independent Elasticsearch percolator match. A live radar pushes real-time alerts the instant a rumor gets confirmed.
 
-**Why/How using Elastic + Apify:**  
-Three Apify actors (Twitter scraper, LinkedIn search, website content crawler) supply structured rumor and multi-tier reality evidence. Elasticsearch Serverless indexes everything with a `semantic_text` field and answers three distinct kinds of question: hybrid RRF retrieval for rumor-to-evidence matching, DSL aggregations (`date_histogram`, `change_point`, `significant_text`) for market trend detection, ES|QL for a piped-query company leaderboard, and a percolator index for reverse "which rumors does this new doc satisfy" matching.
+**Why and how we used Elastic and Apify:**
+Three Apify actors (a Twitter scraper, a LinkedIn search, and a website content crawler) supply the rumor evidence and two tiers of "reality" evidence. Elasticsearch Serverless indexes all of it with a `semantic_text` field and answers three different kinds of questions: hybrid RRF search to match rumors to evidence, aggregations (`date_histogram`, `change_point`, `significant_text`) to spot market trends, ES|QL for a piped-query company leaderboard, and a percolator index to check, in reverse, which rumors a new document satisfies.
 
-**Name/Team:**  
-Your Name(s): _[fill in]_  
+**Name/Team:**
+Your Name(s): _[fill in]_
 Teammates: _[fill in if applicable]_

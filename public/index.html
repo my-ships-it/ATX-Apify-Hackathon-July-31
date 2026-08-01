@@ -141,9 +141,9 @@
         </div>
 
         <div id="onboardingCue" class="onboarding-cue" role="note">
-          1) Click <strong>Run scan</strong> to pull fresh rumor and official signals.<br />
-          2) Open <strong>Signal spotlight</strong> to review the strongest matched evidence first.<br />
-          3) Click <strong>Copy judge-ready summary</strong> for a clean recap you can paste into Slack or Notion.
+          1) Click <strong>Run scan</strong> to pull in fresh rumors and official posts.<br />
+          2) Open <strong>Signal spotlight</strong> to see the strongest match first.<br />
+          3) Click <strong>Copy judge-ready summary</strong> to get a short recap you can paste into Slack or Notion.
         </div>
 
         <div id="scanTimeline" class="scan-timeline hidden" aria-live="polite">
@@ -163,7 +163,7 @@
           <h2>What this scan means</h2>
           <button id="copySummaryBtn" type="button" class="ghost-btn">Copy judge-ready summary</button>
         </div>
-        <p id="narrativeText" class="narrative">Waiting on your first completed scan. Kick off one run to generate your baseline.</p>
+        <p id="narrativeText" class="narrative">No scans yet. Run one to see where things stand.</p>
       </section>
 
       <section id="spotlightPanel" class="panel spotlight hidden">
@@ -176,10 +176,10 @@
       <section id="decisionRailPanel" class="panel decision-rail hidden" aria-live="polite">
         <div class="panel-head">
           <div>
-            <h2>Decision rail</h2>
-            <p class="rail-subtitle">Executive status by bucket with top evidence for each outcome.</p>
+            <h2>Where things stand</h2>
+            <p class="rail-subtitle">Each bucket with its strongest piece of evidence.</p>
           </div>
-          <span id="decisionRailMode" class="rail-mode">Executive alert</span>
+          <span id="decisionRailMode" class="rail-mode">Latest run</span>
         </div>
         <div id="decisionRailCounts" class="rail-counts" aria-live="polite"></div>
         <div id="decisionRailBody" class="decision-rail-body"></div>
@@ -188,8 +188,8 @@
       <section id="marketSignalsPanel" class="panel market-signals hidden">
         <div class="panel-head">
           <div>
-            <h2>Market signal context (Elasticsearch)</h2>
-            <p class="rail-subtitle">Rumor velocity, language drift, and per-company activity from one live ES trend sweep.</p>
+            <h2>Trends behind the numbers</h2>
+            <p class="rail-subtitle">How fast rumors are picking up, what words are showing up more, and which companies are getting the most chatter.</p>
           </div>
         </div>
         <div id="marketSignalsBody" class="market-signals-body"></div>
@@ -463,8 +463,8 @@
 
         if (summaryHeadline) {
           summaryHeadline.textContent = totalSignals
-            ? `Scanned ${scannedTargets} target${scannedTargets === 1 ? '' : 's'} and surfaced ${totalSignals} signal${totalSignals === 1 ? '' : 's'} for executive review.`
-            : `Scanned ${scannedTargets} target${scannedTargets === 1 ? '' : 's'} with no clear signals yet. Run again for a fresh pass.`;
+            ? `Scanned ${scannedTargets} target${scannedTargets === 1 ? '' : 's'} and found ${totalSignals} signal${totalSignals === 1 ? '' : 's'} worth a look.`
+            : `Scanned ${scannedTargets} target${scannedTargets === 1 ? '' : 's'} and didn't find anything clear yet. Try running it again.`;
         }
 
         const configuredThresholds = summary.configuredThresholds || {};
@@ -479,9 +479,9 @@
           )}, ${formatCountText(watching, 'watching signal', 'watching signals')}`,
         );
         bullets.push(
-          `Decision gates: confirmed at ${configuredThresholds.confirm == null ? '--' : configuredThresholds.confirm} and likely at ${
+          `Cutoffs: ${configuredThresholds.confirm == null ? '--' : configuredThresholds.confirm}+ confidence counts as confirmed, ${
             configuredThresholds.likely == null ? '--' : configuredThresholds.likely
-          } confidence thresholds.`,
+          }+ counts as likely.`,
         );
 
         if (deltas) {
@@ -598,7 +598,7 @@
       }
 
       function listText(items) {
-        if (!items || !items.length) return '<li class="muted">No explainability notes available yet.</li>';
+        if (!items || !items.length) return '<li class="muted">No reasons to show yet.</li>';
         return items
           .slice(0, 6)
           .map((item) => `<li>${item}</li>`)
@@ -879,7 +879,7 @@
         }
 
         const total = summary.totalSignals || 0;
-        const topLine = `Scan complete: ${total} signal${total === 1 ? '' : 's'} surfaced at confidence thresholds ${confirm} (confirmed) and ${likely} (likely).`;
+        const topLine = `Scan done: found ${total} signal${total === 1 ? '' : 's'}, using ${confirm}+ for confirmed and ${likely}+ for likely.`;
         const topTwoLine = topSignals.length
           ? `Top 2 by confidence: ${topSignals
               .map((signal) => `${signal.company || 'Unknown'} (${statusLabel(signal.status)}) ${Number(signal.confidence) || 0}%`)
@@ -1105,7 +1105,7 @@
           .map((bucket) => `${statusLabel(bucket.label)}: ${bucket.items.length}`)
           .join(' · ');
 
-        decisionRailMode.textContent = `Run snapshot: ${total} total signals (${statusLine})`;
+        decisionRailMode.textContent = `${total} total signals (${statusLine})`;
         if (decisionRailCounts) {
           decisionRailCounts.innerHTML = statusBuckets
             .map((bucket) => `
@@ -1168,7 +1168,7 @@
         if (!narrativeText || !narrativePanel) return;
         narrativePanel.classList.remove('hidden');
         if (!summary) {
-          narrativeText.textContent = 'Waiting on the latest scan snapshot.';
+          narrativeText.textContent = 'Waiting on the latest scan.';
           return;
         }
         narrativeText.textContent = formatSummaryNarrative(summary, signals);
@@ -1237,7 +1237,7 @@
 
       function officialWhyBlock(sig) {
         if (!sig.officialUrl || !sig.officialText) {
-          return '<div class="why muted">No corroborating official post has landed yet.</div>';
+          return '<div class="why muted">No matching official post yet.</div>';
         }
 
         const snippet = trimText(sig.officialSnippet || sig.officialText, 220);
@@ -1360,7 +1360,7 @@
           const fallback = previousPayload || lastKnownPayload;
           if (fallback) {
             render(fallback);
-            setNotice(`${error.message || 'Failed to load latest data.'} Showing last successful snapshot.`);
+            setNotice(`${error.message || 'Failed to load latest data.'} Showing the last successful run.`);
             setStatus('Ready (cached)');
           } else {
             setNotice(error.message || 'Failed to load latest data.');
@@ -1435,7 +1435,7 @@
           const fallback = lastKnownPayload;
           if (fallback) {
             render(fallback);
-            setNotice(`${error.message || 'Scan failed'} Showing last successful snapshot.`);
+            setNotice(`${error.message || 'Scan failed'} Showing the last successful run.`);
             setStatus('Scan failed (cached)');
           } else {
             setNotice(error.message || 'Scan failed');
@@ -1711,7 +1711,7 @@
             .join('');
 
           const cp = data.changePoint;
-          let changePointHtml = '<div class="muted">Not enough history yet to detect a momentum shift.</div>';
+          let changePointHtml = '<div class="muted">Not enough history yet to spot a change.</div>';
           if (cp && cp.type && cp.type !== 'stationary' && cp.type !== 'indeterminable') {
             const when = cp.bucket?.key ? new Date(cp.bucket.key).toLocaleDateString() : 'recently';
             changePointHtml = `<div class="change-point-alert">📈 Elasticsearch detected a <strong>${esc(cp.type)}</strong> in rumor volume around <strong>${esc(when)}</strong>.</div>`;
@@ -1722,7 +1722,7 @@
           const terms = (data.trendingTerms || [])
             .slice(0, 10)
             .map((t) => `<span class="factor-pill" title="significance score ${t.score}">${esc(t.term)}</span>`)
-            .join('') || '<span class="muted">No standout terms yet.</span>';
+            .join('') || '<span class="muted">No standout words yet.</span>';
 
           const companies = (data.companyActivity || [])
             .map((c) => {
@@ -1741,15 +1741,15 @@
           body.innerHTML = `
             <div class="market-signals-grid">
             <div class="market-signal-card">
-                <h3>Rumor volume trend</h3>
+                <h3>Rumors over time</h3>
                 <div class="sparkline">${sparkline || '<span class="muted">No dated rumor volume yet.</span>'}</div>
               </div>
               <div class="market-signal-card">
-                <h3>Momentum shift detector</h3>
+                <h3>Sudden changes</h3>
                 ${changePointHtml}
               </div>
               <div class="market-signal-card">
-                <h3>Trending rumor language</h3>
+                <h3>Words coming up a lot</h3>
                 <div class="factor-row">${terms}</div>
               </div>
               <div class="market-signal-card">

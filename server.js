@@ -881,6 +881,49 @@ app.get('/api/trends', async (_req, res) => {
   }
 });
 
+// Interactive percolator demo: paste any headline/announcement text and ask Elasticsearch, live,
+// which currently-tracked rumors it would confirm — the reverse-search direction, exposed directly
+// so it can be demoed as its own thing rather than only as an invisible step inside a full scan.
+app.post('/api/percolate-test', async (req, res) => {
+  if (!es) {
+    return res.status(503).json({ ok: false, error: 'Elasticsearch is not configured.' });
+  }
+
+  const body = req.body || {};
+  const text = String(body.text || '').trim();
+  const company = String(body.company || '').trim();
+
+  if (!text) {
+    return res.status(400).json({ ok: false, error: 'Provide "text" (and optionally "company") to test against tracked rumors.' });
+  }
+
+  try {
+    await ensurePercolatorIndex();
+    const query = {
+      percolate: {
+        field: 'query',
+        document: { company: company || undefined, text },
+      },
+    };
+    if (!company) delete query.percolate.document.company;
+
+    const result = await es.search({ index: PERCOLATOR_INDEX, size: 10, query });
+    const hits = (result?.hits?.hits || []).map((hit) => ({
+      rumorTitle: hit._source?.rumorTitle || null,
+      rumorUrl: hit._source?.rumorUrl || null,
+      company: hit._source?.company || null,
+      score: hit._score || null,
+    }));
+
+    res.json({ ok: true, text, company: company || null, matchedRumors: hits, matchCount: hits.length });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error?.meta?.body?.error || error.message || 'Percolate test failed',
+    });
+  }
+});
+
 app.get('/api/health', async (_req, res) => {
   let elasticHealthy = false;
   if (es) {
