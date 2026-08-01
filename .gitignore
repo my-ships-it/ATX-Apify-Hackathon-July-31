@@ -1,2 +1,7 @@
 node_modules
 .env
+
+# agent skill tooling (not part of the app)
+.agents/
+.claude/
+skills-lock.json
