@@ -558,36 +558,36 @@ async function collectByType(targets, sourceType, runtimeInput = null) {
   const sourceField = `${sourceType}Sources`;
   const inputField = `${sourceType}Input`;
 
-  const results = [];
+  // Companies are independent Apify actor calls — run them concurrently instead of sequentially.
+  // With 3 source types x N companies this cuts wall-clock time roughly Nx, which matters because
+  // a synchronous HTTP request behind a reverse proxy (e.g. Railway) will get killed (502) if the
+  // whole scan takes several minutes end-to-end.
+  const perTarget = await Promise.all(
+    targets.map(async (target) => {
+      const actorId = target[actorField];
+      const targetInput = {
+        ...(target[inputField] || {}),
+        __hackathonRuntime: runtimeInput?.__hackathonRuntime || null,
+      };
+      const input = withDefaultInput(targetInput, target[sourceField] || [], sourceType);
 
-  for (const target of targets) {
-    const actorId = target[actorField];
-    const targetInput = {
-      ...(target[inputField] || {}),
-      __hackathonRuntime: runtimeInput?.__hackathonRuntime || null,
-    };
-    const input = withDefaultInput(targetInput, target[sourceField] || [], sourceType);
+      if (!actorId || !input || Object.keys(input).length === 0) return [];
 
-    if (!actorId || !input || Object.keys(input).length === 0) continue;
+      const timeoutOverride = sourceType === 'officialBlog' ? APIFY_BLOG_TIMEOUT_MS : null;
+      const memoryOverride = sourceType === 'officialBlog' ? APIFY_BLOG_MEMORY_MB : APIFY_DEFAULT_MEMORY_MB;
+      let items = [];
+      try {
+        items = await runActor(actorId, input, timeoutOverride, memoryOverride);
+      } catch (error) {
+        // A slow/unreachable blog crawl shouldn't sink the whole scan — log and continue with what we have.
+        console.error(`[collectByType] ${sourceType} actor failed for ${target.company}:`, error?.response?.data || error.message);
+        return [];
+      }
+      return items.map((item) => normalizeItem(item, target.company, sourceType, target.sourceName || target.company));
+    }),
+  );
 
-    const timeoutOverride = sourceType === 'officialBlog' ? APIFY_BLOG_TIMEOUT_MS : null;
-    const memoryOverride = sourceType === 'officialBlog' ? APIFY_BLOG_MEMORY_MB : APIFY_DEFAULT_MEMORY_MB;
-    let items = [];
-    try {
-      items = await runActor(actorId, input, timeoutOverride, memoryOverride);
-    } catch (error) {
-      // A slow/unreachable blog crawl shouldn't sink the whole scan — log and continue with what we have.
-      console.error(`[collectByType] ${sourceType} actor failed for ${target.company}:`, error?.response?.data || error.message);
-      continue;
-    }
-    const normalized = items.map((item) => normalizeItem(item, target.company, sourceType, target.sourceName || target.company));
-
-    for (const doc of normalized) {
-      results.push(doc);
-    }
-  }
-
-  return results;
+  return perTarget.flat();
 }
 
 async function findOfficialMatch(rumor, officialDocs) {
@@ -971,9 +971,12 @@ async function performScanInner(options = {}) {
     };
 
     const targets = sanitizeTargets(await loadTargets());
-    const rumorDocs = await collectByType(targets, 'rumor', runtimeInputs);
-    const officialSocialDocs = await collectByType(targets, 'official', runtimeInputs);
-    const officialBlogDocsRaw = await collectByType(targets, 'officialBlog', runtimeInputs);
+    // The three source types are independent of each other too — collect them concurrently.
+    const [rumorDocs, officialSocialDocs, officialBlogDocsRaw] = await Promise.all([
+      collectByType(targets, 'rumor', runtimeInputs),
+      collectByType(targets, 'official', runtimeInputs),
+      collectByType(targets, 'officialBlog', runtimeInputs),
+    ]);
     // Official company blog posts are a much stronger "reality" signal than a random LinkedIn post,
     // so they're folded into the same official corpus (tagged with their own sourceName) rather than
     // treated as a separate bucket.
