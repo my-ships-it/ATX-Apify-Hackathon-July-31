@@ -16,13 +16,47 @@
           <button id="scanBtn">Run scan</button>
           <button id="refreshBtn">Refresh latest</button>
           <button id="healthBtn">Health check</button>
+          <span id="scanBadge" class="scan-badge" aria-live="polite"></span>
           <span id="statusWrap" class="status-wrap">
             <span id="statusSpinner" class="status-spinner" aria-hidden="true"></span>
             <span id="status" aria-live="polite">Ready</span>
           </span>
         </div>
 
+        <div class="scan-controls">
+          <div class="control-field">
+            <label for="confirmRange">Confirm threshold <span id="confirmRangeValue" class="slider-value">48</span></label>
+            <input id="confirmRange" type="range" min="35" max="95" step="1" value="48" />
+          </div>
+          <div class="control-field">
+            <label for="likelyRange">Likely threshold <span id="likelyRangeValue" class="slider-value">40</span></label>
+            <input id="likelyRange" type="range" min="25" max="90" step="1" value="40" />
+          </div>
+          <div class="control-field">
+            <label for="rumorPosts">Rumor posts per company</label>
+            <input id="rumorPosts" type="range" min="6" max="30" step="1" value="12" />
+            <span id="rumorPostsValue" class="slider-value">12</span>
+          </div>
+          <div class="control-field">
+            <label for="officialPosts">Reality posts per company</label>
+            <input id="officialPosts" type="range" min="8" max="30" step="1" value="12" />
+            <span id="officialPostsValue" class="slider-value">12</span>
+          </div>
+          <div class="control-field">
+            <label for="signalLimit">Signal cards</label>
+            <input id="signalLimit" type="range" min="6" max="40" step="1" value="25" />
+            <span id="signalLimitValue" class="slider-value">25</span>
+          </div>
+        </div>
+
         <p id="missing" class="notice hidden"></p>
+
+        <div id="statusFilterRow" class="status-filter" role="tablist" aria-label="Filter signal status">
+          <button id="filterAll" class="filter-btn active" data-filter="all" type="button">All</button>
+          <button id="filterConfirmed" class="filter-btn" data-filter="confirmed" type="button">Confirmed</button>
+          <button id="filterLikely" class="filter-btn" data-filter="likely" type="button">Likely</button>
+          <button id="filterWatching" class="filter-btn" data-filter="watching" type="button">Watching</button>
+        </div>
 
         <div id="summary" class="summary hidden">
           <div><strong>Scanned:</strong> <span id="summaryScanned">--</span></div>
@@ -33,7 +67,41 @@
           <div><strong>Watching:</strong> <span id="summaryWatching">0</span></div>
           <div><strong>Confirm threshold:</strong> <span id="summaryConfirmThreshold">--</span></div>
           <div><strong>Likely threshold:</strong> <span id="summaryLikelyThreshold">--</span></div>
+          <div><strong>Posts/call:</strong> <span id="summaryPostsSummary">-- / --</span></div>
+          <div><strong>Δ since last:</strong> <span id="summaryDelta">--</span></div>
         </div>
+
+        <div id="statusLegend" class="status-legend" aria-label="status legend">
+          <span class="legend-item"><span class="legend-dot legend-confirmed"></span>confirmed</span>
+          <span class="legend-item"><span class="legend-dot legend-likely"></span>likely</span>
+          <span class="legend-item"><span class="legend-dot legend-watching"></span>watching</span>
+        </div>
+
+        <div id="onboardingCue" class="onboarding-cue" role="note">
+          1) Click <strong>Run scan</strong><br />
+          2) Watch <strong>Signal spotlight</strong> for best evidence<br />
+          3) Use <strong>Copy summary</strong> to share a judge-ready recap
+        </div>
+
+        <div id="scanTimeline" class="scan-timeline hidden" aria-live="polite">
+          <div class="scan-timeline-title">Scan progress</div>
+          <div id="scanSteps" class="scan-steps"></div>
+        </div>
+      </section>
+
+      <section id="narrativePanel" class="panel hidden">
+        <div class="panel-head">
+          <h2>What this run means</h2>
+          <button id="copySummaryBtn" type="button" class="ghost-btn">Copy summary</button>
+        </div>
+        <p id="narrativeText" class="narrative">Waiting for data...</p>
+      </section>
+
+      <section id="spotlightPanel" class="panel spotlight hidden">
+        <h2>Signal spotlight</h2>
+        <div id="spotlightSignal" class="spotlight"></div>
+        <div id="topSignalCompare" class="top-signals hidden"></div>
+        <div id="topOfficialSources" class="official-sources hidden"></div>
       </section>
 
       <section class="panel">
@@ -47,10 +115,13 @@
       </section>
     </main>
 
+    <div id="runDigest" class="run-digest hidden" role="status" aria-live="polite"></div>
+
     <script>
       const statusEl = document.getElementById('status');
       const statusWrap = document.getElementById('statusWrap');
       const statusSpinner = document.getElementById('statusSpinner');
+      const scanBadge = document.getElementById('scanBadge');
       const signalsEl = document.getElementById('signals');
       const rawEl = document.getElementById('raw');
       const missingEl = document.getElementById('missing');
@@ -67,6 +138,36 @@
       const summaryWatching = document.getElementById('summaryWatching');
       const summaryConfirmThreshold = document.getElementById('summaryConfirmThreshold');
       const summaryLikelyThreshold = document.getElementById('summaryLikelyThreshold');
+      const summaryPostsSummary = document.getElementById('summaryPostsSummary');
+      const summaryDelta = document.getElementById('summaryDelta');
+      const scanTimelineEl = document.getElementById('scanTimeline');
+      const scanStepsEl = document.getElementById('scanSteps');
+      const narrativePanel = document.getElementById('narrativePanel');
+      const narrativeText = document.getElementById('narrativeText');
+      const spotlightPanel = document.getElementById('spotlightPanel');
+      const spotlightSignal = document.getElementById('spotlightSignal');
+      const topSignalCompare = document.getElementById('topSignalCompare');
+      const copySummaryBtn = document.getElementById('copySummaryBtn');
+      const runDigestEl = document.getElementById('runDigest');
+      const onboardingCue = document.getElementById('onboardingCue');
+      const topOfficialSourcesEl = document.getElementById('topOfficialSources');
+      const confirmRange = document.getElementById('confirmRange');
+      const likelyRange = document.getElementById('likelyRange');
+      const rumorPostsInput = document.getElementById('rumorPosts');
+      const officialPostsInput = document.getElementById('officialPosts');
+      const signalLimitInput = document.getElementById('signalLimit');
+      const confirmRangeValue = document.getElementById('confirmRangeValue');
+      const likelyRangeValue = document.getElementById('likelyRangeValue');
+      const rumorPostsValue = document.getElementById('rumorPostsValue');
+      const officialPostsValue = document.getElementById('officialPostsValue');
+      const signalLimitValue = document.getElementById('signalLimitValue');
+      const filterAllBtn = document.getElementById('filterAll');
+      const filterConfirmedBtn = document.getElementById('filterConfirmed');
+      const filterLikelyBtn = document.getElementById('filterLikely');
+      const filterWatchingBtn = document.getElementById('filterWatching');
+
+      const statusFilterButtons = [filterAllBtn, filterConfirmedBtn, filterLikelyBtn, filterWatchingBtn].filter(Boolean);
+      let activeSignalFilter = 'all';
 
       function setNotice(msg) {
         if (msg) {
@@ -87,9 +188,45 @@
         summaryLikely.textContent = summary.likely || 0;
         summaryWatching.textContent = summary.watching || 0;
 
+        const rumorPostsSummary = summary.config || {};
+        summaryPostsSummary.textContent = rumorPostsSummary.rumorPosts != null && rumorPostsSummary.officialPosts != null
+          ? `${rumorPostsSummary.rumorPosts} / ${rumorPostsSummary.officialPosts}`
+          : '-- / --';
+
+        if (summary.deltas) {
+          const deltas = summary.deltas;
+          const fmt = (n) => `${n >= 0 ? '+' : ''}${n}`;
+          summaryDelta.textContent = `S ${fmt(deltas.signals)} · C ${fmt(deltas.confirmed)} · L ${fmt(deltas.likely)} · W ${fmt(deltas.watching)}`;
+        } else {
+          summaryDelta.textContent = '--';
+        }
+
         const configuredThresholds = summary.configuredThresholds || {};
         summaryConfirmThreshold.textContent = configuredThresholds.confirm == null ? '--' : configuredThresholds.confirm;
         summaryLikelyThreshold.textContent = configuredThresholds.likely == null ? '--' : configuredThresholds.likely;
+
+        if (summaryPostsSummary && summaryPostsSummary.textContent && summaryPostsSummary.textContent !== '-- / --') {
+          rumorPostsInput.value = String(rumorPostsSummary.rumorPosts || rumorPostsInput.value || 12);
+          officialPostsInput.value = String(rumorPostsSummary.officialPosts || officialPostsInput.value || 12);
+          rumorPostsValue.textContent = rumorPostsInput.value;
+          officialPostsValue.textContent = officialPostsInput.value;
+        }
+        if (Number.isFinite(summary.totalSignals) && signalLimitInput) {
+          const requestedSignals = Math.min(40, Math.max(6, Number(summary.config?.maxSignals || summary.totalSignals)));
+          signalLimitInput.value = String(requestedSignals);
+          signalLimitValue.textContent = signalLimitInput.value;
+        }
+
+        if (configuredThresholds.confirm != null) {
+          confirmRange.value = String(configuredThresholds.confirm);
+          confirmRangeValue.textContent = confirmRange.value;
+        }
+        if (configuredThresholds.likely != null) {
+          likelyRange.value = String(configuredThresholds.likely);
+          likelyRangeValue.textContent = likelyRange.value;
+        }
+
+        syncLikelyFloor();
       }
 
       function setStatus(msg, isRunning = false) {
@@ -144,6 +281,445 @@
         return '';
       }
 
+      const scanPhases = [
+        'Collecting rumor signals',
+        'Collecting reality posts',
+        'Running semantic match',
+        'Scoring and ranking',
+      ];
+
+      let lastKnownPayload = null;
+      let timelineInterval = null;
+      let activeScanRunId = 0;
+      let runDigestTimer = null;
+      let hasRunOnce = false;
+
+      function htmlEscape(value) {
+        return String(value || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function renderScanTimeline() {
+        if (!scanStepsEl) return;
+        scanStepsEl.innerHTML = scanPhases
+          .map(
+            (phase) => `
+            <div class="scan-step" data-phase="${phase}">
+              <span class="scan-dot" aria-hidden="true"></span>
+              <span>${phase}</span>
+            </div>
+          `,
+          )
+          .join('');
+      }
+
+      function setScanProgress(runId, phaseIndex, terminalStatus = null) {
+        if (runId !== activeScanRunId || !scanStepsEl) return;
+        const steps = scanStepsEl.querySelectorAll('.scan-step');
+        steps.forEach((step, index) => {
+          step.classList.toggle('done', index < phaseIndex);
+          step.classList.toggle('active', index === phaseIndex);
+        });
+        if (terminalStatus === 'error') {
+          const active = scanStepsEl.querySelector('.scan-step.active');
+          if (active) {
+            active.classList.remove('active');
+            active.classList.add('error');
+          }
+        }
+      }
+
+      function toSafeIntValue(value, fallback, min, max) {
+        const parsed = Number.parseInt(String(value || ''), 10);
+        if (!Number.isFinite(parsed)) return fallback;
+        if (min != null && parsed < min) return min;
+        if (max != null && parsed > max) return max;
+        return parsed;
+      }
+
+      function syncLikelyFloor() {
+        const confirmVal = toSafeIntValue(confirmRange.value, 48, 35, 95);
+        const likelyFloor = Math.max(25, Math.min(90, confirmVal - 5));
+        likelyRange.max = String(confirmVal - 1);
+        likelyRange.min = '25';
+        likelyRangeValue.textContent = likelyRange.value;
+        if (Number(likelyRange.value) >= confirmVal) {
+          likelyRange.value = String(likelyFloor);
+          likelyRangeValue.textContent = likelyRange.value;
+        }
+      }
+
+      function getScanConfig() {
+        return {
+          confirm: toSafeIntValue(confirmRange.value, 48, 35, 95),
+          likely: toSafeIntValue(likelyRange.value, 40, 25, 95),
+          rumorPosts: toSafeIntValue(rumorPostsInput.value, 12, 6, 30),
+          officialPosts: toSafeIntValue(officialPostsInput.value, 12, 8, 30),
+          maxSignals: toSafeIntValue(signalLimitInput.value, 25, 6, 40),
+        };
+      }
+
+      function filterSignals(signals) {
+        if (activeSignalFilter === 'all') return signals;
+        return signals.filter((signal) => signal.status === activeSignalFilter);
+      }
+
+      function updateFilterUI() {
+        statusFilterButtons.forEach((button) => {
+          const isActive = button.dataset.filter === activeSignalFilter;
+          button.classList.toggle('active', isActive);
+          button.setAttribute('aria-selected', String(isActive));
+        });
+      }
+
+      function startScanProgress() {
+        activeScanRunId += 1;
+        const runId = activeScanRunId;
+        scanTimelineEl.classList.remove('hidden');
+        renderScanTimeline();
+        setScanProgress(runId, 0);
+        let phaseIndex = 0;
+
+        if (timelineInterval) {
+          clearInterval(timelineInterval);
+          timelineInterval = null;
+        }
+
+        timelineInterval = setInterval(() => {
+          if (runId !== activeScanRunId || phaseIndex >= scanPhases.length - 1) {
+            return;
+          }
+          phaseIndex += 1;
+          setScanProgress(runId, phaseIndex);
+          const message = scanPhases[phaseIndex];
+          statusEl.textContent = message;
+        }, 650);
+
+        return runId;
+      }
+
+      function endScanProgress(runId, success = true) {
+        if (runId !== activeScanRunId || !scanTimelineEl || !scanStepsEl) return;
+        if (timelineInterval) {
+          clearInterval(timelineInterval);
+          timelineInterval = null;
+        }
+        if (success) {
+          setScanProgress(runId, scanPhases.length - 1);
+          setTimeout(() => {
+            if (runId === activeScanRunId) {
+              scanTimelineEl.classList.add('hidden');
+            }
+          }, 900);
+        } else {
+          setScanProgress(runId, Math.max(0, Math.min(scanPhases.length - 1, 1)), 'error');
+        }
+      }
+
+      function confidenceChipText(sig) {
+        const matchSignals = sig.matchSignals || {};
+        const chips = [];
+        if (matchSignals.lexical !== undefined && matchSignals.lexical !== null) {
+          chips.push(`Lexical overlap: ${matchSignals.lexical}`);
+        }
+        if (matchSignals.semantic !== undefined && matchSignals.semantic !== null) {
+          chips.push(`Semantic similarity: ${matchSignals.semantic}`);
+        }
+        if (sig.confirmLagDays !== undefined && sig.confirmLagDays !== null) {
+          chips.push(`Lag: ${sig.confirmLagDays} day(s)`);
+        }
+        if (matchSignals.sourceName) {
+          chips.push(`Source: ${matchSignals.sourceName}`);
+        }
+        if (!chips.length) {
+          return sig.confidenceSignals?.length ? sig.confidenceSignals.slice(0, 4) : [];
+        }
+        return chips;
+      }
+
+      function confidenceChipHtml(sig) {
+        const chips = confidenceChipText(sig);
+        if (!chips.length) return '<div class="factor-pill muted">Confidence factors pending</div>';
+        return chips
+          .slice(0, 6)
+          .map((chip) => `<span class="factor-pill">${chip}</span>`)
+          .join('');
+      }
+
+      function updateOnboardingCue(payload) {
+        if (!onboardingCue) return;
+        const hasRunData =
+          payload &&
+          ((Array.isArray(payload.signals) && payload.signals.length > 0) ||
+            (payload.summary && (payload.summary.scannedTargets > 0 || payload.summary.totalSignals > 0)));
+        onboardingCue.classList.toggle('hidden', Boolean(hasRunData));
+      }
+
+      function renderRunDigest(summary, signals) {
+        if (!runDigestEl) return;
+        if (!summary) return;
+
+        const topSignals = getRankedSignals(signals || []).slice(0, 2);
+        const confirm = (summary.configuredThresholds && summary.configuredThresholds.confirm != null) ? summary.configuredThresholds.confirm : '--';
+        const likely = (summary.configuredThresholds && summary.configuredThresholds.likely != null) ? summary.configuredThresholds.likely : '--';
+
+        if (runDigestTimer) {
+          clearTimeout(runDigestTimer);
+        }
+
+        const total = summary.totalSignals || 0;
+        const topLine = `Run complete: ${total} signal(s), confirm ≥ ${confirm}, likely ≥ ${likely}.`;
+        const topTwoLine = topSignals.length
+          ? `Top 2: ${topSignals
+              .map((signal) => `${signal.company || 'Unknown'} (${signal.status}) ${Number(signal.confidence) || 0}%`)
+              .join(' · ')}`
+          : 'Top 2: none yet';
+
+        runDigestEl.textContent = `${topLine} ${topTwoLine}`;
+        runDigestEl.classList.remove('hidden');
+
+        runDigestTimer = setTimeout(() => {
+          runDigestEl.classList.add('hidden');
+        }, 6000);
+      }
+
+      function getOfficialHost(url) {
+        if (!url) return 'official source';
+        try {
+          const parsed = new URL(url);
+          return parsed.hostname.replace(/^www\./, '');
+        } catch (error) {
+          const cleaned = String(url).replace(/^https?:\/\//, '').split('/')[0];
+          return cleaned || 'official source';
+        }
+      }
+
+      function renderOfficialSources(signals) {
+        if (!topOfficialSourcesEl) return;
+        topOfficialSourcesEl.innerHTML = '';
+
+        const validatedSignals = (signals || [])
+          .filter((signal) => signal && signal.officialUrl && (signal.status === 'confirmed' || signal.status === 'likely'))
+          .sort((a, b) => (Number(b.confidence) || 0) - (Number(a.confidence) || 0));
+
+        if (!validatedSignals.length) {
+          topOfficialSourcesEl.classList.add('hidden');
+          return;
+        }
+
+        const topSources = [];
+        const seen = new Set();
+
+        validatedSignals.forEach((signal) => {
+          if (topSources.length >= 2) return;
+          if (!seen.has(signal.officialUrl)) {
+            seen.add(signal.officialUrl);
+            topSources.push(signal);
+          }
+        });
+
+        if (!topSources.length) {
+          topOfficialSourcesEl.classList.add('hidden');
+          return;
+        }
+
+        topOfficialSourcesEl.classList.remove('hidden');
+        topOfficialSourcesEl.innerHTML = `
+          <h3>Official sources verified</h3>
+          <div class="official-source-list">
+            ${topSources
+              .map((signal) => {
+                const host = getOfficialHost(signal.officialUrl);
+                const linkLabel = signal.officialTitle ? trimText(signal.officialTitle, 72) : host;
+                const confidence = Math.min(100, Math.max(0, Number(signal.confidence) || 0));
+                return `
+                  <div class="official-source-row">
+                    <div class="official-source-title">
+                      <span class="pill ${badgeClass(signal.status)}">${signal.status}</span>
+                      <a href="${htmlEscape(signal.officialUrl)}" target="_blank" rel="noreferrer">${htmlEscape(linkLabel)}</a>
+                    </div>
+                    <div class="official-source-meta">
+                      <span>${htmlEscape(signal.company || 'Unknown')}</span>
+                      <span>${confidence}% match</span>
+                    </div>
+                  </div>
+                `;
+              })
+              .join('')}
+          </div>
+        `;
+      }
+
+      function formatSummaryNarrative(summary, signals = []) {
+        const scannedTargets = summary.scannedTargets || 0;
+        const totalSignals = summary.totalSignals || 0;
+        const confirmed = summary.confirmed || 0;
+        const likely = summary.likely || 0;
+        const watching = summary.watching || 0;
+        const configuredThresholds = summary.configuredThresholds || {};
+        const confirmThreshold = configuredThresholds.confirm == null ? '--' : configuredThresholds.confirm;
+        const likelyThreshold = configuredThresholds.likely == null ? '--' : configuredThresholds.likely;
+
+        const withLag = signals
+          .filter((sig) => typeof sig.confirmLagDays === 'number' && Number.isFinite(sig.confirmLagDays))
+          .map((sig) => sig.confirmLagDays);
+        const fastestLag = withLag.length ? Math.min(...withLag) : null;
+
+        if (!totalSignals) {
+          return `No confident matches yet from ${scannedTargets} scanned target(s). Keep scanning for rumor-confirmation links.`;
+        }
+
+        const lagText = fastestLag == null ? '' : ` Fastest confirmation: ${fastestLag} day(s).`;
+        return `Scanned ${scannedTargets} target(s) and found ${totalSignals} signal(s): ${confirmed} confirmed (≥${confirmThreshold}), ${likely} likely (≥${likelyThreshold}), ${watching} watching.${lagText}`;
+      }
+
+      function getRankedSignals(signals) {
+        return signals
+          .slice()
+          .sort((a, b) => {
+            const order = { confirmed: 2, likely: 1, watching: 0 };
+            const statusDelta = (order[b.status] ?? 0) - (order[a.status] ?? 0);
+            if (statusDelta !== 0) return statusDelta;
+            return (Number(b.confidence) || 0) - (Number(a.confidence) || 0);
+          });
+      }
+
+      function renderSpotlight(signals) {
+        if (!spotlightSignal || !spotlightPanel) return;
+        spotlightSignal.innerHTML = '';
+
+        if (!signals.length) {
+          spotlightPanel.classList.add('hidden');
+          return;
+        }
+
+        spotlightPanel.classList.remove('hidden');
+        const rankedSignals = getRankedSignals(signals);
+        const topSignal = rankedSignals[0];
+
+        const lagText = topSignal.confirmLagDays == null ? 'unconfirmed' : `${topSignal.confirmLagDays} day(s)`;
+        const reasonList = topSignal.matchingReasons && topSignal.matchingReasons.length ? listText(topSignal.matchingReasons.slice(0, 4)) : '<li class="muted">No direct reason list yet.</li>';
+        const snippet = officialWhyBlock(topSignal);
+
+        spotlightSignal.innerHTML = `
+          <div class="spotlight-headline">${topSignal.company} · <strong>${topSignal.status}</strong> · ${topSignal.confidence || 0}% confidence</div>
+          <p class="title">${topSignal.rumorTitle || topSignal.rumorText || 'Matched rumor signal'}</p>
+          <p class="meta">Rumor seen: ${formatDate(topSignal.rumorAt)} · Confirm lag: ${lagText}</p>
+          <div class="factor-row">${confidenceChipHtml(topSignal)}</div>
+          <p class="why-label">Why this matched</p>
+          <ul class="reason-list">${reasonList}</ul>
+          ${snippet}
+          <p class="meta">${topSignal.rumorUrl ? `Source: <a href="${topSignal.rumorUrl}" target="_blank" rel="noreferrer">open rumor</a>${topSignal.officialUrl ? ` · Reality: <a href="${topSignal.officialUrl}" target="_blank" rel="noreferrer">open official</a>` : ''}` : 'Source links not available.'}</p>
+        `;
+      }
+
+      function renderTopSignalCompare(signals) {
+        if (!topSignalCompare) return;
+        topSignalCompare.innerHTML = '';
+
+        if (!signals.length) {
+          topSignalCompare.classList.add('hidden');
+          return;
+        }
+
+        const rankedSignals = getRankedSignals(signals).slice(0, 3);
+        topSignalCompare.classList.remove('hidden');
+
+        const rows = rankedSignals
+          .map((signal, index) => {
+            const confidence = Math.min(100, Math.max(0, Number(signal.confidence) || 0));
+            const title = rumorTitleLine(signal);
+            return `
+              <div class="top-signal-row">
+                <div class="top-signal-rank">#${index + 1}</div>
+                <div class="top-signal-copy">
+                  <div class="top-signal-title">${title || 'Rumor signal'}</div>
+                  <div class="top-signal-meta">
+                    <span class="pill ${badgeClass(signal.status)}">${signal.status}</span>
+                    <span>${signal.company}</span>
+                    <span>Lag: ${signal.confirmLagDays == null ? 'unconfirmed' : `${signal.confirmLagDays} day(s)`}</span>
+                  </div>
+                </div>
+                <div class="top-signal-score">
+                  <div class="mini-confidence-bar" role="img" aria-label="confidence ${confidence} percent"><span style="width:${confidence}%"></span></div>
+                  <span>${confidence}%</span>
+                </div>
+              </div>
+            `;
+          })
+          .join('');
+
+        topSignalCompare.innerHTML = `
+          <h3>Top 3 confidence compare</h3>
+          ${rows}
+        `;
+      }
+
+      function renderNarrative(summary, signals = []) {
+        if (!narrativeText || !narrativePanel) return;
+        narrativePanel.classList.remove('hidden');
+        if (!summary) {
+          narrativeText.textContent = 'Waiting for scan data.';
+          return;
+        }
+        narrativeText.textContent = formatSummaryNarrative(summary, signals);
+      }
+
+      function copySummaryPayload(summary, signals) {
+        const topLine = formatSummaryNarrative(summary, signals);
+        const topSignals = getRankedSignals(signals || [])
+          .slice(0, 3)
+          .map((signal, index) => {
+            const confidence = Number(signal.confidence) || 0;
+            const company = signal.company || 'Unknown';
+            const status = String(signal.status || 'watching').toUpperCase();
+            return `${index + 1}) ${company} - ${status} - ${confidence}% confidence`;
+          });
+
+        const confidenceLine = topSignals.length ? `Top 3 signals:\n${topSignals.join('\n')}` : 'No signals in latest run.';
+        return `${topLine}\n${confidenceLine}\n\nGenerated: ${new Date().toLocaleString()}`;
+      }
+
+      async function copyNarrativeToClipboard() {
+        if (!lastKnownPayload || !narrativeText) {
+          setNotice('No summary available to copy yet.');
+          return;
+        }
+        const summary = lastKnownPayload.summary || {};
+        const signals = Array.isArray(lastKnownPayload.signals) ? lastKnownPayload.signals : [];
+        const text = copySummaryPayload(summary, signals);
+
+        try {
+          if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+          }
+          const original = copySummaryBtn ? copySummaryBtn.textContent : 'Copy summary';
+          if (copySummaryBtn) {
+            copySummaryBtn.textContent = 'Copied!';
+            setTimeout(() => {
+              copySummaryBtn.textContent = original;
+            }, 1200);
+          }
+          setNotice('Summary copied to clipboard.');
+        } catch (error) {
+          setNotice(`Copy failed: ${error.message || 'try again'}.`);
+        }
+      }
+
       function animateIn(el, delayMs = 0) {
         if (!el) return;
         el.style.setProperty('--stagger', `${delayMs}ms`);
@@ -168,17 +744,34 @@
       }
 
       function render(payload) {
+        if (!payload) {
+          if (lastKnownPayload) {
+            render(lastKnownPayload);
+          }
+          return;
+        }
+
         setNotice(payload.missingEnv?.length ? `Missing env: ${payload.missingEnv.join(', ')}` : '');
+        updateOnboardingCue(payload);
 
         if (payload.summary) setSummary(payload.summary);
+        const signals = Array.isArray(payload.signals) ? payload.signals : [];
+        const visibleSignals = filterSignals(signals);
+        const raw = Array.isArray(payload.raw) ? payload.raw : [];
+
+        renderSpotlight(signals);
+        renderTopSignalCompare(signals);
+        renderOfficialSources(signals);
+        renderNarrative(payload.summary || {}, signals);
 
         signalsEl.innerHTML = '';
 
-        if (!payload.signals.length) {
-          signalsEl.innerHTML = '<div class="empty">No signals yet. Run a scan to collect rumor + official posts.</div>';
+        if (!visibleSignals.length) {
+          const filterLabel = activeSignalFilter === 'all' ? 'No signals yet.' : `No ${activeSignalFilter} signals this run.`;
+          signalsEl.innerHTML = `<div class="empty">${filterLabel}</div>`;
         }
 
-        payload.signals.forEach((sig, index) => {
+        visibleSignals.forEach((sig, index) => {
           const confidence = Number(sig.confidence) || 0;
           const rumorLine = rumorTitleLine(sig);
           const rumorBody = rumorBodyLine(sig);
@@ -206,6 +799,7 @@
             <p class="why-label">Why this matched</p>
             <ul class="reason-list">${sig.matchingReasons?.length ? listText(sig.matchingReasons) : '<li class="muted">No matching official post yet.</li>'}</ul>
             ${officialWhyBlock(sig)}
+            <div class="factor-row">${confidenceChipHtml(sig)}</div>
             <p class="meta">${sig.confidenceSignals?.length ? `Confidence factors: ${sig.confidenceSignals.join(' · ')}` : 'Confidence factors: rumor context only'}</p>
           `;
           signalsEl.appendChild(card);
@@ -213,15 +807,23 @@
         });
 
         rawEl.innerHTML = '';
-        payload.raw.slice(0, 40).forEach((d, index) => {
+        raw.slice(0, 40).forEach((d, index) => {
           const row = document.createElement('div');
           row.className = 'raw-item';
+          const sourceType = d.sourceType ? String(d.sourceType).toUpperCase() : 'SOURCE';
+          const fullText = (d.text || d.title || '').toString().trim();
+          const snippet = trimText(fullText, 220);
+
           row.innerHTML = `
             <div>
-              <strong>${d.company}</strong> · ${d.sourceType.toUpperCase()} · ${formatDate(d.publishedAt)}
+              <strong>${htmlEscape(d.company || 'Unknown')}</strong> · ${htmlEscape(sourceType)} · ${formatDate(d.publishedAt)}
             </div>
-            <a href="${d.url}" target="_blank" rel="noreferrer">${d.url || 'No URL'}</a>
-            <p>${d.title}</p>
+            <a href="${htmlEscape(d.url || '#')}" target="_blank" rel="noreferrer">${htmlEscape(d.url || 'No URL')}</a>
+            <p class="raw-snippet">${htmlEscape(snippet)}</p>
+            <details class="raw-expand">
+              <summary>Expand full text</summary>
+              <p class="raw-full">${htmlEscape(fullText || 'No post text captured.')}</p>
+            </details>
           `;
           rawEl.appendChild(row);
           animateIn(row, index * 30 + 120);
@@ -229,41 +831,97 @@
       }
 
       async function fetchLatest() {
+        const previousPayload = lastKnownPayload;
         setStatus('Refreshing...', true);
         try {
           const res = await fetch('/api/latest');
           const payload = await res.json();
           if (!res.ok || !payload.ok) {
             setNotice(payload.error || 'Failed to load latest data.');
+          } else {
+            lastKnownPayload = payload;
+            setNotice('');
           }
           render(payload);
           setStatus('Ready');
         } catch (error) {
-          setNotice(error.message || 'Failed to load latest data.');
-          setStatus('Error');
+          const fallback = previousPayload || lastKnownPayload;
+          if (fallback) {
+            render(fallback);
+            setNotice(`${error.message || 'Failed to load latest data.'} Showing last successful snapshot.`);
+            setStatus('Ready (cached)');
+          } else {
+            setNotice(error.message || 'Failed to load latest data.');
+            setStatus('Error');
+          }
         }
       }
 
+      function withTimeout(ms, promise) {
+        return Promise.race([
+          promise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out')), ms)),
+        ]);
+      }
+
       async function runScan() {
+        let runId = startScanProgress();
         setStatus('Running scan...', true);
+        setNotice('');
+        if (scanBadge) {
+          scanBadge.textContent = 'live';
+        }
+        const config = getScanConfig();
         try {
-          const res = await fetch('/api/scan', { method: 'POST' });
+          const params = new URLSearchParams({
+            confirm: String(config.confirm),
+            likely: String(config.likely),
+            rumorPosts: String(config.rumorPosts),
+            officialPosts: String(config.officialPosts),
+            maxSignals: String(config.maxSignals),
+          });
+          const res = await withTimeout(
+            120000,
+            fetch(`/api/scan?${params.toString()}`, {
+              method: 'POST',
+            }),
+          );
           const payload = await res.json();
+          endScanProgress(runId, res.ok && payload.ok);
           if (!res.ok || !payload.ok) {
             throw new Error(payload.error || 'Scan request failed');
           }
-          setStatus('Scan complete');
+          lastKnownPayload = payload;
           render(payload);
+          renderRunDigest(payload.summary || {}, payload.signals || []);
+          if (scanBadge) {
+            scanBadge.textContent = 'ready';
+          }
+          setStatus('Scan complete');
         } catch (error) {
-          setNotice(error.message || 'Scan failed');
-          setStatus('Scan failed');
+          endScanProgress(runId, false);
+          if (scanBadge) {
+            scanBadge.textContent = 'cached';
+          }
+          const fallback = lastKnownPayload;
+          if (fallback) {
+            render(fallback);
+            setNotice(`${error.message || 'Scan failed'} Showing last successful snapshot.`);
+            setStatus('Scan failed (cached)');
+          } else {
+            setNotice(error.message || 'Scan failed');
+            setStatus('Scan failed');
+          }
         }
       }
 
       async function runHealth() {
         setStatus('Checking health...', true);
         try {
-          const res = await fetch('/api/health');
+          const res = await withTimeout(
+            10000,
+            fetch('/api/health'),
+          );
           const payload = await res.json();
           if (!payload.ok) {
             setNotice(`Missing env: ${payload.missingEnv.join(', ')}`);
@@ -280,8 +938,56 @@
       scanBtn.addEventListener('click', runScan);
       refreshBtn.addEventListener('click', fetchLatest);
       healthBtn.addEventListener('click', runHealth);
+      if (copySummaryBtn) {
+        copySummaryBtn.addEventListener('click', copyNarrativeToClipboard);
+      }
+      if (confirmRange) {
+        confirmRange.addEventListener('input', () => {
+          confirmRangeValue.textContent = confirmRange.value;
+          syncLikelyFloor();
+        });
+      }
+      if (likelyRange) {
+        likelyRange.addEventListener('input', () => {
+          if (Number(likelyRange.value) >= Number(confirmRange.value)) {
+            likelyRange.value = String(Math.max(25, Number(confirmRange.value) - 5));
+          }
+          likelyRangeValue.textContent = likelyRange.value;
+        });
+      }
+      if (rumorPostsInput) {
+        rumorPostsInput.addEventListener('input', () => {
+          rumorPostsValue.textContent = rumorPostsInput.value;
+        });
+      }
+      if (officialPostsInput) {
+        officialPostsInput.addEventListener('input', () => {
+          officialPostsValue.textContent = officialPostsInput.value;
+        });
+      }
+      if (signalLimitInput) {
+        signalLimitInput.addEventListener('input', () => {
+          signalLimitValue.textContent = signalLimitInput.value;
+        });
+      }
+      statusFilterButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          activeSignalFilter = button.dataset.filter || 'all';
+          updateFilterUI();
+          if (lastKnownPayload) {
+            render(lastKnownPayload);
+          }
+        });
+      });
+
+      if (scanBadge) {
+        scanBadge.textContent = 'ready';
+      }
+      syncLikelyFloor();
+      updateFilterUI();
 
       fetchLatest();
     </script>
+
   </body>
 </html>

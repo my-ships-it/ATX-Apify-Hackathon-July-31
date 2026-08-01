@@ -11,6 +11,7 @@ dotenv.config();
 
 const app = express();
 app.use(express.static('public'));
+app.use(express.json());
 
 const PORT = Number(process.env.PORT || 3000);
 const PROJECT_ROOT = process.cwd();
@@ -169,15 +170,29 @@ function buildMatchSignals(rumorText, officialDoc, semanticScore, overlap, lagDa
   };
 }
 
-function summarizeSignals(signals, targetsCount, rumorDocsCount, officialDocsCount, matchThresholds) {
-  return {
-    scannedTargets: targetsCount,
-    rumorDocs: rumorDocsCount,
-    officialDocs: officialDocsCount,
+function summarizeSignals(signals, targetsCount, rumorDocsCount, officialDocsCount, matchThresholds, previousSummary = null) {
+  const current = {
     totalSignals: signals.length,
     confirmed: signals.filter((signal) => signal.status === 'confirmed').length,
     likely: signals.filter((signal) => signal.status === 'likely').length,
     watching: signals.filter((signal) => signal.status === 'watching').length,
+  };
+
+  return {
+    scannedTargets: targetsCount,
+    rumorDocs: rumorDocsCount,
+    officialDocs: officialDocsCount,
+    ...current,
+    deltas: previousSummary
+      ? {
+          signals: current.totalSignals - (previousSummary.totalSignals || 0),
+          confirmed: current.confirmed - (previousSummary.confirmed || 0),
+          likely: current.likely - (previousSummary.likely || 0),
+          watching: current.watching - (previousSummary.watching || 0),
+          rumorDocs: rumorDocsCount - (previousSummary.rumorDocs || 0),
+          officialDocs: officialDocsCount - (previousSummary.officialDocs || 0),
+        }
+      : null,
     latestRumorAt: rumorDocsCount ? signals[0]?.rumorAt || null : null,
     configuredThresholds: matchThresholds,
   };
@@ -219,6 +234,7 @@ const state = {
   lastRunAt: null,
   signals: [],
   raw: [],
+  lastRunSummary: null,
   summary: {
     scannedTargets: 0,
     rumorDocs: 0,
@@ -352,14 +368,38 @@ async function loadTargets() {
 }
 
 function withDefaultInput(input, urls, sourceType) {
-  const explicitStartUrls = Object.prototype.hasOwnProperty.call(input, 'startUrls') ? input.startUrls : undefined;
-  const withDefaults = { ...input };
+  const runtimeInput = input || {};
+  const explicitStartUrls = Object.prototype.hasOwnProperty.call(runtimeInput, 'startUrls') ? runtimeInput.startUrls : undefined;
+  const withDefaults = { ...runtimeInput };
+  const runtimeRumorPosts = Number.parseInt(runtimeInput?.__hackathonRuntime?.rumorPosts, 10);
+  const runtimeOfficialPosts = Number.parseInt(runtimeInput?.__hackathonRuntime?.officialPosts, 10);
+  const runtimeMaxPosts = Number.parseInt(runtimeInput?.__hackathonRuntime?.maxPosts, 10);
+
+  const rumorMaxPosts = Number.isFinite(runtimeRumorPosts)
+    ? runtimeRumorPosts
+    : Number.isFinite(runtimeMaxPosts)
+      ? runtimeMaxPosts
+      : null;
+  const officialMaxPosts = Number.isFinite(runtimeOfficialPosts)
+    ? runtimeOfficialPosts
+    : Number.isFinite(runtimeMaxPosts)
+      ? runtimeMaxPosts
+      : null;
+
+  delete withDefaults.__hackathonRuntime;
 
   if (!Object.prototype.hasOwnProperty.call(withDefaults, 'max_posts') && sourceType === 'rumor') {
     withDefaults.max_posts = APIFY_MAX_POSTS_DEFAULT;
   }
   if (!Object.prototype.hasOwnProperty.call(withDefaults, 'maxPosts') && sourceType === 'official') {
     withDefaults.maxPosts = APIFY_MAX_POSTS_DEFAULT;
+  }
+
+  if (sourceType === 'rumor' && rumorMaxPosts !== null) {
+    withDefaults.max_posts = rumorMaxPosts;
+  }
+  if (sourceType === 'official' && officialMaxPosts !== null) {
+    withDefaults.maxPosts = officialMaxPosts;
   }
 
   if (explicitStartUrls !== undefined) return withDefaults;
@@ -389,7 +429,7 @@ function sanitizeTargets(targets) {
     .filter((target) => target.company && target.rumorActorId && target.officialActorId);
 }
 
-async function collectByType(targets, sourceType) {
+async function collectByType(targets, sourceType, runtimeInput = null) {
   const actorField = `${sourceType}ActorId`;
   const sourceField = `${sourceType}Sources`;
   const inputField = `${sourceType}Input`;
@@ -398,7 +438,11 @@ async function collectByType(targets, sourceType) {
 
   for (const target of targets) {
     const actorId = target[actorField];
-    const input = withDefaultInput(target[inputField] || {}, target[sourceField] || [], sourceType);
+    const targetInput = {
+      ...(target[inputField] || {}),
+      __hackathonRuntime: runtimeInput?.__hackathonRuntime || null,
+    };
+    const input = withDefaultInput(targetInput, target[sourceField] || [], sourceType);
 
     if (!actorId || !input || Object.keys(input).length === 0) continue;
 
@@ -526,32 +570,50 @@ function scoreRumor(rawScore, lagDays, rumorText, rumorAt) {
   let score = rawScore;
   const reasons = reasonBadges(rumorText);
   const rumorAge = rumorAgeDays(rumorAt);
+  const breakdown = {
+    rawScore: clamp(Math.round(rawScore), 0, 99),
+    urgencyBoost: 0,
+    timingBoost: 0,
+    freshnessBoost: 0,
+    lagBoost: 0,
+    confidence: 0,
+  };
 
   if (/\b(announce|announcing|shipping|launch|launching|teaser|reveal|release|beta|private beta|pilot)\b/i.test(rumorText)) {
-    score += 9;
+    const boost = 9;
+    score += boost;
+    breakdown.urgencyBoost += boost;
     if (!reasons.includes('Launch language detected')) reasons.push('Launch language detected');
   }
 
   if (/\b(today|tomorrow|this week|next week|this month|hours|minutes)\b/i.test(rumorText)) {
-    score += 5;
+    const boost = 5;
+    score += boost;
+    breakdown.timingBoost += boost;
     if (!reasons.includes('Near-term timing reference')) reasons.push('Near-term timing reference');
   }
 
   if (rumorAge !== null && rumorAge <= 2) {
-    score += 4;
+    const boost = 4;
+    score += boost;
+    breakdown.freshnessBoost += boost;
     reasons.push('Very recent rumor input');
   }
 
   if (lagDays !== null && lagDays <= 14) {
-    score += lagDays === 0 ? 12 : lagDays <= 3 ? 10 : 6;
+    const boost = lagDays === 0 ? 12 : lagDays <= 3 ? 10 : 6;
+    score += boost;
+    breakdown.lagBoost += boost;
   }
 
   const confidence = clamp(Math.round(score), 12, 99);
+  breakdown.confidence = confidence;
 
   return {
     confidence,
     signalList: Array.from(new Set(reasons)).filter(Boolean),
     baseline: rawScore,
+    breakdown,
   };
 }
 
@@ -591,9 +653,25 @@ app.get('/api/latest', (_req, res) => {
 
 app.post('/api/scan', async (_req, res) => {
   try {
+    const body = _req.body || {};
+    const queryConfirm = toSafeInt(body.confirm ?? _req.query.confirm, CONFIRM_THRESHOLD, 30, 95);
+    const queryLikely = toSafeInt(body.likely ?? _req.query.likely, LIKELY_THRESHOLD, 20, 90);
+    const confirmThreshold = clamp(Math.max(queryConfirm, 35), 30, 95);
+    const likelyThreshold = clamp(Math.min(queryLikely, confirmThreshold - 5), 20, 90);
+    const maxSignals = toSafeInt(body.maxSignals ?? _req.query.maxSignals, 25, 1, 100);
+    const rumorPosts = toSafeInt(body.rumorPosts ?? body.maxPosts ?? _req.query.rumorPosts ?? _req.query.maxPosts, APIFY_MAX_POSTS_DEFAULT, 3, 80);
+    const officialPosts = toSafeInt(body.officialPosts ?? body.maxPosts ?? _req.query.officialPosts ?? _req.query.maxPosts, APIFY_MAX_POSTS_DEFAULT, 3, 120);
+
+    const runtimeInputs = {
+      __hackathonRuntime: {
+        rumorPosts,
+        officialPosts,
+      },
+    };
+
     const targets = sanitizeTargets(await loadTargets());
-    const rumorDocs = await collectByType(targets, 'rumor');
-    const officialDocs = await collectByType(targets, 'official');
+    const rumorDocs = await collectByType(targets, 'rumor', runtimeInputs);
+    const officialDocs = await collectByType(targets, 'official', runtimeInputs);
     const allDocs = [...rumorDocs, ...officialDocs];
 
     const sortedRaw = allDocs
@@ -606,7 +684,7 @@ app.post('/api/scan', async (_req, res) => {
       await persistDocuments(allDocs);
     }
 
-    const signals = [];
+    const scoredSignals = [];
     for (const rumor of rumorDocs) {
       const matchResult = await findOfficialMatch(rumor, officialDocs);
       const match = matchResult?.match || null;
@@ -616,10 +694,10 @@ app.post('/api/scan', async (_req, res) => {
       const confidence = scoreResult.confidence;
 
       let status = 'watching';
-      if (match && confidence >= CONFIRM_THRESHOLD) status = 'confirmed';
-      else if (match && confidence >= LIKELY_THRESHOLD) status = 'likely';
+      if (match && confidence >= confirmThreshold) status = 'confirmed';
+      else if (match && confidence >= likelyThreshold) status = 'likely';
 
-      signals.push({
+      scoredSignals.push({
         company: rumor.company,
         rumorAt: rumor.publishedAt,
         rumorTitle: rumor.title,
@@ -638,17 +716,36 @@ app.post('/api/scan', async (_req, res) => {
         matchingReasons: matchResult?.reasons || [],
         matchSignals: matchResult?.matchSignals || null,
         matchSearchScore: matchResult?.searchScore || null,
+        scoreBreakdown: scoreResult.breakdown || null,
       });
     }
 
-    state.signals = signals
+    const currentSummary = summarizeSignals(scoredSignals, targets.length, rumorDocs.length, officialDocs.length, {
+      confirm: confirmThreshold,
+      likely: likelyThreshold,
+    }, state.lastRunSummary);
+
+    state.signals = scoredSignals
       .sort((a, b) => b.confidence - a.confidence)
-      .slice(0, 25);
+      .slice(0, maxSignals);
     state.lastRunAt = new Date().toISOString();
-    state.summary = summarizeSignals(state.signals, targets.length, rumorDocs.length, officialDocs.length, {
-      confirm: CONFIRM_THRESHOLD,
-      likely: LIKELY_THRESHOLD,
-    });
+    state.lastRunSummary = {
+      ...state.summary,
+      deltas: null,
+    };
+    state.summary = currentSummary;
+
+    state.summary.config = {
+      confirm: confirmThreshold,
+      likely: likelyThreshold,
+      rumorPosts,
+      officialPosts,
+      maxSignals,
+    };
+    state.summary.configuredThresholds = {
+      confirm: confirmThreshold,
+      likely: likelyThreshold,
+    };
 
     res.json({
       ok: true,
