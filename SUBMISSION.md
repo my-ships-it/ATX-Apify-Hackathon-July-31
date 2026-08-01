@@ -47,5 +47,4 @@ Rumor → Reality Launch Radar pulls in rumor signals from Twitter, social "offi
 Three Apify actors (a Twitter scraper, a LinkedIn search, and a website content crawler) supply the rumor evidence and two tiers of "reality" evidence. Elasticsearch Serverless indexes all of it with a `semantic_text` field and answers three different kinds of questions: hybrid RRF search to match rumors to evidence, aggregations (`date_histogram`, `change_point`, `significant_text`) to spot market trends, ES|QL for a piped-query company leaderboard, and a percolator index to check, in reverse, which rumors a new document satisfies.
 
 **Name/Team:**
-Your Name(s): _[fill in]_
-Teammates: _[fill in if applicable]_
+Mike Yerke (solo) — https://www.linkedin.com/in/mikeyerke
