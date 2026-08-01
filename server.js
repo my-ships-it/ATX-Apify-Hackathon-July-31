@@ -206,6 +206,8 @@ const APIFY_REQUEST_TIMEOUT_MS = Number(process.env.APIFY_REQUEST_TIMEOUT_MS || 
 const APIFY_MAX_RETRY = Number(process.env.APIFY_MAX_RETRY || 2);
 const APIFY_MAX_POSTS_DEFAULT = Number(process.env.APIFY_MAX_POSTS_DEFAULT || 12);
 const APIFY_MAX_CHARGE_USD = Number(process.env.APIFY_MAX_CHARGE_USD || 0.25);
+const APIFY_DEFAULT_MEMORY_MB = Number(process.env.APIFY_DEFAULT_MEMORY_MB || 512);
+const APIFY_BLOG_MEMORY_MB = Number(process.env.APIFY_BLOG_MEMORY_MB || 2048);
 const APIFY_BLOG_TIMEOUT_MS = Number(process.env.APIFY_BLOG_TIMEOUT_MS || 90000);
 
 const ES_URL = process.env.ELASTICSEARCH_URL || '';
@@ -299,6 +301,102 @@ async function ensureIndex() {
   }
 }
 
+const PERCOLATOR_INDEX = `${ES_INDEX}-percolator`;
+
+async function ensurePercolatorIndex() {
+  if (!es) return;
+  const exists = await es.indices.exists({ index: PERCOLATOR_INDEX });
+  if (exists === true || exists?.body === true) return;
+
+  try {
+    await es.indices.create({
+      index: PERCOLATOR_INDEX,
+      body: {
+        mappings: {
+          properties: {
+            query: { type: 'percolator' },
+            company: { type: 'keyword' },
+            text: { type: 'text' },
+            rumorFingerprint: { type: 'keyword' },
+            rumorTitle: { type: 'text' },
+            rumorUrl: { type: 'keyword' },
+            registeredAt: { type: 'date' },
+          },
+        },
+      },
+    });
+  } catch (error) {
+    const alreadyExists =
+      error?.meta?.body?.error?.type === 'resource_already_exists_exception' ||
+      /resource_already_exists_exception/.test(error?.message || '');
+    if (!alreadyExists) throw error;
+  }
+}
+
+// Registers each rumor as a STORED QUERY (Elasticsearch's percolator feature) instead of just
+// searching forward from rumor -> official docs. This lets us ask the reverse question cheaply:
+// "does this new official post satisfy any rumor we're already watching?" — the same mechanism
+// production alerting systems (e.g. "notify me when a document matching X arrives") are built on.
+async function registerRumorPercolatorQueries(rumorDocs) {
+  if (!es || !rumorDocs.length) return;
+  await ensurePercolatorIndex();
+
+  const body = rumorDocs.flatMap((rumor) => [
+    { index: { _index: PERCOLATOR_INDEX, _id: rumor.fingerprint } },
+    {
+      query: {
+        bool: {
+          filter: [{ term: { company: rumor.company } }],
+          must: [{ match: { text: { query: rumor.text, minimum_should_match: '60%' } } }],
+        },
+      },
+      company: rumor.company,
+      rumorFingerprint: rumor.fingerprint,
+      rumorTitle: rumor.title,
+      rumorUrl: rumor.url,
+      registeredAt: new Date().toISOString(),
+    },
+  ]);
+
+  await es.bulk({ refresh: true, body });
+}
+
+// Reverse-search: for each freshly collected official doc, ask the percolator index which
+// stored rumor queries it satisfies. Returns a map of rumorFingerprint -> matching official docs.
+async function percolateOfficialDocs(officialDocs) {
+  if (!es || !officialDocs.length) return new Map();
+  await ensurePercolatorIndex();
+
+  const matches = new Map();
+
+  for (const doc of officialDocs.slice(0, 40)) {
+    try {
+      const result = await es.search({
+        index: PERCOLATOR_INDEX,
+        size: 10,
+        query: {
+          percolate: {
+            field: 'query',
+            document: { company: doc.company, text: doc.text },
+          },
+        },
+      });
+      const hits = result?.hits?.hits || [];
+      for (const hit of hits) {
+        const fingerprint = hit._source?.rumorFingerprint;
+        if (!fingerprint) continue;
+        if (!matches.has(fingerprint)) matches.set(fingerprint, []);
+        matches.get(fingerprint).push({ url: doc.url, title: doc.title, sourceName: doc.sourceName });
+      }
+    } catch (error) {
+      // Percolator is a bonus signal, not a hard dependency of the scan — skip failures quietly.
+      console.error('[percolateOfficialDocs] failed:', error?.meta?.body?.error || error.message);
+    }
+  }
+
+  return matches;
+}
+
 async function persistDocuments(docs) {
   if (!docs.length || !es) return;
   await ensureIndex();
@@ -314,7 +412,7 @@ async function persistDocuments(docs) {
   await es.bulk({ refresh: true, body });
 }
 
-async function runActor(actorId, input, timeoutMsOverride = null) {
+async function runActor(actorId, input, timeoutMsOverride = null, memoryMbOverride = null) {
   if (!actorId || !APIFY_TOKEN) return [];
 
   const clientTimeoutMs = timeoutMsOverride || APIFY_TIMEOUT_MS;
@@ -332,6 +430,8 @@ async function runActor(actorId, input, timeoutMsOverride = null) {
       maxTotalChargeUsd: APIFY_MAX_CHARGE_USD,
       // Give the actor run itself close to the full HTTP window so slow crawls don't get killed mid-run.
       timeout: Math.max(10, Math.round(clientTimeoutMs / 1000) - 5),
+      // Cap memory per run so a handful of concurrent scans can't exceed the account's total memory pool.
+      memory: memoryMbOverride || APIFY_DEFAULT_MEMORY_MB,
     },
     timeout: clientTimeoutMs,
     data: input,
@@ -471,9 +571,10 @@ async function collectByType(targets, sourceType, runtimeInput = null) {
     if (!actorId || !input || Object.keys(input).length === 0) continue;
 
     const timeoutOverride = sourceType === 'officialBlog' ? APIFY_BLOG_TIMEOUT_MS : null;
+    const memoryOverride = sourceType === 'officialBlog' ? APIFY_BLOG_MEMORY_MB : APIFY_DEFAULT_MEMORY_MB;
     let items = [];
     try {
-      items = await runActor(actorId, input, timeoutOverride);
+      items = await runActor(actorId, input, timeoutOverride, memoryOverride);
     } catch (error) {
       // A slow/unreachable blog crawl shouldn't sink the whole scan — log and continue with what we have.
       console.error(`[collectByType] ${sourceType} actor failed for ${target.company}:`, error?.response?.data || error.message);
@@ -840,7 +941,21 @@ function detectStatusFlips(previousSignals, nextSignals) {
   return flips;
 }
 
+let scanInProgress = false;
+
 async function performScan(options = {}) {
+  if (scanInProgress) {
+    throw new Error('A scan is already running — please wait for it to finish before starting another.');
+  }
+  scanInProgress = true;
+  try {
+    return await performScanInner(options);
+  } finally {
+    scanInProgress = false;
+  }
+}
+
+async function performScanInner(options = {}) {
   const confirmThreshold = clamp(Math.max(toSafeInt(options.confirm, CONFIRM_THRESHOLD, 30, 95), 35), 30, 95);
   const likelyThreshold = clamp(Math.min(toSafeInt(options.likely, LIKELY_THRESHOLD, 20, 90), confirmThreshold - 5), 20, 90);
   const maxSignals = toSafeInt(options.maxSignals, 25, 1, 100);
@@ -880,14 +995,28 @@ async function performScan(options = {}) {
       await persistDocuments(allDocs);
     }
 
+    let percolatorMatches = new Map();
+    if (es) {
+      // Register this run's rumors as stored percolator queries, then ask (in reverse) which of
+      // them the freshly collected official docs already satisfy — independent of the forward
+      // RRF search below, as a cross-check signal.
+      await registerRumorPercolatorQueries(rumorDocs);
+      percolatorMatches = await percolateOfficialDocs(officialDocs);
+    }
+
     const scoredSignals = [];
     for (const rumor of rumorDocs) {
       const matchResult = await findOfficialMatch(rumor, officialDocs);
       const match = matchResult?.match || null;
       const matchLagDays = matchResult?.lagDays;
+      const percolatorHits = percolatorMatches.get(rumor.fingerprint) || [];
 
       const scoreResult = scoreRumor(matchResult?.score || 0, matchLagDays, rumor.text, rumor.publishedAt);
-      const confidence = scoreResult.confidence;
+      let confidence = scoreResult.confidence;
+      if (percolatorHits.length) {
+        confidence = clamp(confidence + 6, 12, 99);
+        scoreResult.signalList.push('Confirmed independently by Elasticsearch percolator reverse-match');
+      }
 
       let status = 'watching';
       if (match && confidence >= confirmThreshold) status = 'confirmed';
@@ -913,6 +1042,8 @@ async function performScan(options = {}) {
         matchSignals: matchResult?.matchSignals || null,
         matchSearchScore: matchResult?.searchScore || null,
         scoreBreakdown: scoreResult.breakdown || null,
+        percolatorConfirmed: percolatorHits.length > 0,
+        percolatorHits: percolatorHits.slice(0, 3),
       });
     }
 

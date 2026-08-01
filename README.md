@@ -55,3 +55,7 @@ Hackathon version focused on **Apify + Elasticsearch** with a spicy demo angle:
 
 ## One-liner for the judge demo
 "The app doesn’t just show keyword hits — it explains *why* rumor chatter gets promoted into likely/reality signals by combining semantic retrieval, exact overlap, and timing lag directly inside Elasticsearch."
+
+## Submission pack
+- Full submission notes and Airtable-ready copy: [SUBMISSION.md](SUBMISSION.md)
+- Live app: https://rumor-radar-web-production.up.railway.app

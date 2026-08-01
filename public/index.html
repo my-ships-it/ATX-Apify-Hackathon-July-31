@@ -53,10 +53,11 @@
           </aside>
         </div>
 
-        <div class="controls">
+        <div class="controls hero-actions">
           <button id="scanBtn">Run scan</button>
           <button id="refreshBtn">Refresh latest</button>
           <button id="healthBtn">Health check</button>
+          <button id="liveRadarBtn" class="live-radar-btn" type="button" aria-pressed="false">🔴 Live radar: off</button>
           <span id="scanDuration" class="scan-duration hidden" aria-live="polite"></span>
           <span id="scanBadge" class="scan-badge" aria-live="polite"></span>
           <span id="statusWrap" class="status-wrap">
@@ -105,11 +106,11 @@
 
         <p id="missing" class="notice hidden"></p>
 
-        <div id="statusFilterRow" class="status-filter" role="tablist" aria-label="Filter signal status">
-          <button id="filterAll" class="filter-btn active" data-filter="all" type="button">All signals</button>
-          <button id="filterConfirmed" class="filter-btn" data-filter="confirmed" type="button">Confirmed</button>
-          <button id="filterLikely" class="filter-btn" data-filter="likely" type="button">Likely</button>
-          <button id="filterWatching" class="filter-btn" data-filter="watching" type="button">Watching</button>
+        <div id="statusFilterRow" class="status-filter segmented-control" role="tablist" aria-label="Filter signal status">
+          <button id="filterAll" class="filter-btn active" data-filter="all" data-segment="0" type="button">All signals</button>
+          <button id="filterConfirmed" class="filter-btn" data-filter="confirmed" data-segment="1" type="button">Confirmed</button>
+          <button id="filterLikely" class="filter-btn" data-filter="likely" data-segment="2" type="button">Likely</button>
+          <button id="filterWatching" class="filter-btn" data-filter="watching" data-segment="3" type="button">Watching</button>
         </div>
         <div id="presetRow" class="status-filter preset-row" role="group" aria-label="Scan presets">
           <button id="presetBalanced" class="filter-btn" type="button" data-preset="balanced">Balanced</button>
@@ -282,6 +283,7 @@
 
       const statusFilterButtons = [filterAllBtn, filterConfirmedBtn, filterLikelyBtn, filterWatchingBtn].filter(Boolean);
       const presetButtons = [presetBalancedBtn, presetPrecisionBtn, presetRecallBtn].filter(Boolean);
+      const statusFilterRow = document.getElementById('statusFilterRow');
       let activeSignalFilter = 'all';
       const signalHistory = [];
       const terminalLines = [];
@@ -757,6 +759,11 @@
           button.classList.toggle('active', isActive);
           button.setAttribute('aria-selected', String(isActive));
         });
+        if (statusFilterRow) {
+          const activeIndex = statusFilterButtons.findIndex((button) => button.dataset.filter === activeSignalFilter);
+          statusFilterRow.style.setProperty('--segment-index', activeIndex >= 0 ? activeIndex : 0);
+          statusFilterRow.style.setProperty('--segment-count', statusFilterButtons.length);
+        }
       }
 
       function startScanProgress() {
@@ -1771,6 +1778,87 @@
             setTimeout(fetchTrends, 4000);
           });
         }
+      })();
+    </script>
+    <script>
+      (function () {
+        const liveBtn = document.getElementById('liveRadarBtn');
+        if (!liveBtn) return;
+
+        let toastHost = document.getElementById('liveToastHost');
+        if (!toastHost) {
+          toastHost = document.createElement('div');
+          toastHost.id = 'liveToastHost';
+          toastHost.className = 'live-toast-host';
+          document.body.appendChild(toastHost);
+        }
+
+        function esc(value) {
+          return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        }
+
+        function showToast(flip) {
+          const toast = document.createElement('div');
+          toast.className = `live-toast live-toast-${flip.status === 'confirmed' ? 'confirmed' : 'likely'}`;
+          const icon = flip.status === 'confirmed' ? '🚨' : '👀';
+          toast.innerHTML = `
+            <div class="live-toast-head">${icon} <strong>${esc(flip.company)}</strong> rumor just went <strong>${esc(flip.status).toUpperCase()}</strong></div>
+            <div class="live-toast-body">${esc((flip.rumorTitle || '').slice(0, 90))}</div>
+            <div class="live-toast-meta">${flip.confidence}% confidence${flip.officialUrl ? ` · <a href="${esc(flip.officialUrl)}" target="_blank" rel="noreferrer">evidence</a>` : ''}</div>
+          `;
+          toastHost.appendChild(toast);
+          requestAnimationFrame(() => toast.classList.add('show'));
+          setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 400);
+          }, 8000);
+        }
+
+        let eventSource = null;
+        let liveEnabled = false;
+
+        function connectEvents() {
+          if (eventSource) return;
+          eventSource = new EventSource('/api/events');
+          eventSource.addEventListener('alert', (event) => {
+            try {
+              showToast(JSON.parse(event.data));
+            } catch (error) {
+              /* ignore malformed event */
+            }
+          });
+          eventSource.addEventListener('scan-complete', () => {
+            if (typeof fetchLatest === 'function') fetchLatest();
+          });
+        }
+
+        async function setAutoScan(enabled) {
+          try {
+            await fetch('/api/autoscan', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ enabled, intervalMs: 120000 }),
+            });
+          } catch (error) {
+            /* best-effort */
+          }
+        }
+
+        liveBtn.addEventListener('click', async () => {
+          liveEnabled = !liveEnabled;
+          liveBtn.textContent = liveEnabled ? '🟢 Live radar: on (auto-scan every 2m)' : '🔴 Live radar: off';
+          liveBtn.setAttribute('aria-pressed', String(liveEnabled));
+          liveBtn.classList.toggle('live-on', liveEnabled);
+          if (liveEnabled) {
+            connectEvents();
+          }
+          await setAutoScan(liveEnabled);
+        });
+
+        connectEvents();
       })();
     </script>
 
