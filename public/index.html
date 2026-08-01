@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rumor → Reality Launch Radar</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main>
+      <section class="panel hero">
+        <h1>Rumor → Reality Launch Radar</h1>
+        <p class="subtle">Apify + Elasticsearch scanner: detect which rumors are already becoming reality.</p>
+
+        <div class="controls">
+          <button id="scanBtn">Run scan</button>
+          <button id="refreshBtn">Refresh latest</button>
+          <button id="healthBtn">Health check</button>
+          <span id="statusWrap" class="status-wrap">
+            <span id="statusSpinner" class="status-spinner" aria-hidden="true"></span>
+            <span id="status" aria-live="polite">Ready</span>
+          </span>
+        </div>
+
+        <p id="missing" class="notice hidden"></p>
+
+        <div id="summary" class="summary hidden">
+          <div><strong>Scanned:</strong> <span id="summaryScanned">--</span></div>
+          <div><strong>Targets:</strong> <span id="summaryTargets">0</span></div>
+          <div><strong>Signals:</strong> <span id="summarySignals">0</span></div>
+          <div><strong>Confirmed:</strong> <span id="summaryConfirmed">0</span></div>
+          <div><strong>Likely:</strong> <span id="summaryLikely">0</span></div>
+          <div><strong>Watching:</strong> <span id="summaryWatching">0</span></div>
+          <div><strong>Confirm threshold:</strong> <span id="summaryConfirmThreshold">--</span></div>
+          <div><strong>Likely threshold:</strong> <span id="summaryLikelyThreshold">--</span></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Top signals</h2>
+        <div id="signals" class="grid"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Raw feed</h2>
+        <div id="raw" class="list"></div>
+      </section>
+    </main>
+
+    <script>
+      const statusEl = document.getElementById('status');
+      const statusWrap = document.getElementById('statusWrap');
+      const statusSpinner = document.getElementById('statusSpinner');
+      const signalsEl = document.getElementById('signals');
+      const rawEl = document.getElementById('raw');
+      const missingEl = document.getElementById('missing');
+      const summaryEl = document.getElementById('summary');
+      const scanBtn = document.getElementById('scanBtn');
+      const refreshBtn = document.getElementById('refreshBtn');
+      const healthBtn = document.getElementById('healthBtn');
+
+      const summaryScanned = document.getElementById('summaryScanned');
+      const summaryTargets = document.getElementById('summaryTargets');
+      const summarySignals = document.getElementById('summarySignals');
+      const summaryConfirmed = document.getElementById('summaryConfirmed');
+      const summaryLikely = document.getElementById('summaryLikely');
+      const summaryWatching = document.getElementById('summaryWatching');
+      const summaryConfirmThreshold = document.getElementById('summaryConfirmThreshold');
+      const summaryLikelyThreshold = document.getElementById('summaryLikelyThreshold');
+
+      function setNotice(msg) {
+        if (msg) {
+          missingEl.textContent = msg;
+          missingEl.classList.remove('hidden');
+        } else {
+          missingEl.textContent = '';
+          missingEl.classList.add('hidden');
+        }
+      }
+
+      function setSummary(summary) {
+        summaryEl.classList.remove('hidden');
+        summaryScanned.textContent = summary.scannedAt ? new Date(summary.scannedAt).toLocaleString() : '--';
+        summaryTargets.textContent = summary.scannedTargets || 0;
+        summarySignals.textContent = summary.totalSignals || 0;
+        summaryConfirmed.textContent = summary.confirmed || 0;
+        summaryLikely.textContent = summary.likely || 0;
+        summaryWatching.textContent = summary.watching || 0;
+
+        const configuredThresholds = summary.configuredThresholds || {};
+        summaryConfirmThreshold.textContent = configuredThresholds.confirm == null ? '--' : configuredThresholds.confirm;
+        summaryLikelyThreshold.textContent = configuredThresholds.likely == null ? '--' : configuredThresholds.likely;
+      }
+
+      function setStatus(msg, isRunning = false) {
+        statusEl.textContent = msg;
+        statusSpinner.classList.toggle('active', isRunning);
+        statusEl.classList.toggle('running', isRunning);
+        statusWrap.classList.toggle('running', isRunning);
+        scanBtn.disabled = isRunning;
+        refreshBtn.disabled = isRunning;
+        healthBtn.disabled = isRunning;
+      }
+
+      function formatDate(ts) {
+        if (!ts) return 'n/a';
+        const d = new Date(ts);
+        if (Number.isNaN(d.getTime())) return 'n/a';
+        return d.toLocaleString();
+      }
+
+      function badgeClass(status) {
+        if (status === 'confirmed') return 'green';
+        if (status === 'likely') return 'yellow';
+        return 'blue';
+      }
+
+      function listText(items) {
+        if (!items || !items.length) return '<li class="muted">No detailed reasons available.</li>';
+        return items
+          .slice(0, 6)
+          .map((item) => `<li>${item}</li>`)
+          .join('');
+      }
+
+      function trimText(text, max = 260) {
+        const value = String(text || '').trim();
+        if (!value) return '';
+        if (value.length <= max) return value;
+        return `${value.slice(0, max)}…`;
+      }
+
+      function rumorTitleLine(sig) {
+        const title = String(sig.rumorTitle || '').trim();
+        const body = String(sig.rumorText || '').trim();
+        if (title && body && title !== body) return title;
+        return trimText(body, 170);
+      }
+
+      function rumorBodyLine(sig) {
+        const title = String(sig.rumorTitle || '').trim();
+        const body = String(sig.rumorText || '').trim();
+        if (title && body && title !== body) return trimText(body, 210);
+        return '';
+      }
+
+      function animateIn(el, delayMs = 0) {
+        if (!el) return;
+        el.style.setProperty('--stagger', `${delayMs}ms`);
+        requestAnimationFrame(() => {
+          el.classList.add('entered');
+        });
+      }
+
+      function officialWhyBlock(sig) {
+        if (!sig.officialUrl || !sig.officialText) {
+          return '<div class="why muted">No matching official post yet.</div>';
+        }
+
+        const snippet = trimText(sig.officialSnippet || sig.officialText, 220);
+        return `
+          <div class="why why-match">
+            <div class="why-label">Matched official post</div>
+            <p class="snippet">${snippet}</p>
+            <a href="${sig.officialUrl}" target="_blank" rel="noreferrer">Open matched post</a>
+          </div>
+        `;
+      }
+
+      function render(payload) {
+        setNotice(payload.missingEnv?.length ? `Missing env: ${payload.missingEnv.join(', ')}` : '');
+
+        if (payload.summary) setSummary(payload.summary);
+
+        signalsEl.innerHTML = '';
+
+        if (!payload.signals.length) {
+          signalsEl.innerHTML = '<div class="empty">No signals yet. Run a scan to collect rumor + official posts.</div>';
+        }
+
+        payload.signals.forEach((sig, index) => {
+          const confidence = Number(sig.confidence) || 0;
+          const rumorLine = rumorTitleLine(sig);
+          const rumorBody = rumorBodyLine(sig);
+
+          const card = document.createElement('article');
+          card.className = 'card';
+          card.innerHTML = `
+            <header>
+              <strong>${sig.company}</strong>
+              <span class="pill ${badgeClass(sig.status)}">${sig.status}</span>
+            </header>
+            <p class="title">${rumorLine}</p>
+            ${rumorBody ? `<p class="meta">${rumorBody}</p>` : ''}
+
+            <div class="confidence">
+              <span>Confidence</span>
+              <strong>${confidence}%</strong>
+            </div>
+            <div class="confidenceBar" role="img" aria-label="confidence ${confidence} percent">
+              <span style="width:${confidence}%"></span>
+            </div>
+
+            <div class="meta">Rumor seen: ${formatDate(sig.rumorAt)} · Confirm lag: ${sig.confirmLagDays == null ? 'unconfirmed' : `${sig.confirmLagDays} day(s)`}</div>
+            <div class="meta">Source: <a href="${sig.rumorUrl}" target="_blank" rel="noreferrer">rumor</a>${sig.officialUrl ? ` · Reality: <a href="${sig.officialUrl}" target="_blank" rel="noreferrer">official</a>` : ''}</div>
+            <p class="why-label">Why this matched</p>
+            <ul class="reason-list">${sig.matchingReasons?.length ? listText(sig.matchingReasons) : '<li class="muted">No matching official post yet.</li>'}</ul>
+            ${officialWhyBlock(sig)}
+            <p class="meta">${sig.confidenceSignals?.length ? `Confidence factors: ${sig.confidenceSignals.join(' · ')}` : 'Confidence factors: rumor context only'}</p>
+          `;
+          signalsEl.appendChild(card);
+          animateIn(card, index * 55);
+        });
+
+        rawEl.innerHTML = '';
+        payload.raw.slice(0, 40).forEach((d, index) => {
+          const row = document.createElement('div');
+          row.className = 'raw-item';
+          row.innerHTML = `
+            <div>
+              <strong>${d.company}</strong> · ${d.sourceType.toUpperCase()} · ${formatDate(d.publishedAt)}
+            </div>
+            <a href="${d.url}" target="_blank" rel="noreferrer">${d.url || 'No URL'}</a>
+            <p>${d.title}</p>
+          `;
+          rawEl.appendChild(row);
+          animateIn(row, index * 30 + 120);
+        });
+      }
+
+      async function fetchLatest() {
+        setStatus('Refreshing...', true);
+        try {
+          const res = await fetch('/api/latest');
+          const payload = await res.json();
+          if (!res.ok || !payload.ok) {
+            setNotice(payload.error || 'Failed to load latest data.');
+          }
+          render(payload);
+          setStatus('Ready');
+        } catch (error) {
+          setNotice(error.message || 'Failed to load latest data.');
+          setStatus('Error');
+        }
+      }
+
+      async function runScan() {
+        setStatus('Running scan...', true);
+        try {
+          const res = await fetch('/api/scan', { method: 'POST' });
+          const payload = await res.json();
+          if (!res.ok || !payload.ok) {
+            throw new Error(payload.error || 'Scan request failed');
+          }
+          setStatus('Scan complete');
+          render(payload);
+        } catch (error) {
+          setNotice(error.message || 'Scan failed');
+          setStatus('Scan failed');
+        }
+      }
+
+      async function runHealth() {
+        setStatus('Checking health...', true);
+        try {
+          const res = await fetch('/api/health');
+          const payload = await res.json();
+          if (!payload.ok) {
+            setNotice(`Missing env: ${payload.missingEnv.join(', ')}`);
+          } else {
+            setNotice(`Elastic healthy: ${payload.elasticHealthy ? 'yes' : 'no'} · confirm threshold: ${payload.thresholds.confirm}`);
+          }
+          setStatus('Ready');
+        } catch (error) {
+          setNotice(error.message || 'Health check failed');
+          setStatus('Error');
+        }
+      }
+
+      scanBtn.addEventListener('click', runScan);
+      refreshBtn.addEventListener('click', fetchLatest);
+      healthBtn.addEventListener('click', runHealth);
+
+      fetchLatest();
+    </script>
+  </body>
+</html>

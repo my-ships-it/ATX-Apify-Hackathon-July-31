@@ -1,0 +1,58 @@
+{
+  "targets": [
+    {
+      "company": "OpenAI",
+      "sourceName": "OpenAI",
+      "rumorActorId": "danek~twitter-scraper",
+      "officialActorId": "harvestapi~linkedin-post-search",
+      "rumorInput": {
+        "username": "openai",
+        "max_posts": 20
+      },
+      "officialInput": {
+        "searchQueries": ["OpenAI launch announcement", "OpenAI product update"],
+        "maxPosts": 25,
+        "scrapeReactions": false,
+        "postNestedReactions": false,
+        "scrapeComments": false,
+        "postNestedComments": false
+      }
+    },
+    {
+      "company": "Stripe",
+      "sourceName": "Stripe",
+      "rumorActorId": "danek~twitter-scraper",
+      "officialActorId": "harvestapi~linkedin-post-search",
+      "rumorInput": {
+        "username": "stripe",
+        "max_posts": 20
+      },
+      "officialInput": {
+        "searchQueries": ["Stripe launch announcement", "Stripe product launch"],
+        "maxPosts": 25,
+        "scrapeReactions": false,
+        "postNestedReactions": false,
+        "scrapeComments": false,
+        "postNestedComments": false
+      }
+    },
+    {
+      "company": "Anthropic",
+      "sourceName": "Anthropic",
+      "rumorActorId": "danek~twitter-scraper",
+      "officialActorId": "harvestapi~linkedin-post-search",
+      "rumorInput": {
+        "username": "anthropicai",
+        "max_posts": 20
+      },
+      "officialInput": {
+        "searchQueries": ["Anthropic launch announcement", "Anthropic product launch"],
+        "maxPosts": 25,
+        "scrapeReactions": false,
+        "postNestedReactions": false,
+        "scrapeComments": false,
+        "postNestedComments": false
+      }
+    }
+  ]
+}

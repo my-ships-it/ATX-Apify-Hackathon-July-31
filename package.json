@@ -1,0 +1,14 @@
+{
+  "name": "atx-apify-hackathon-july-31",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@elastic/elasticsearch": "^8.13.1",
+    "axios": "^1.7.7",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}
