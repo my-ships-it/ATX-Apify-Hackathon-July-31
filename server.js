@@ -205,6 +205,8 @@ const APIFY_TIMEOUT_MS = Number(process.env.APIFY_TIMEOUT_MS || 45000);
 const APIFY_REQUEST_TIMEOUT_MS = Number(process.env.APIFY_REQUEST_TIMEOUT_MS || 180000);
 const APIFY_MAX_RETRY = Number(process.env.APIFY_MAX_RETRY || 2);
 const APIFY_MAX_POSTS_DEFAULT = Number(process.env.APIFY_MAX_POSTS_DEFAULT || 12);
+const APIFY_MAX_CHARGE_USD = Number(process.env.APIFY_MAX_CHARGE_USD || 0.25);
+const APIFY_BLOG_TIMEOUT_MS = Number(process.env.APIFY_BLOG_TIMEOUT_MS || 90000);
 
 const ES_URL = process.env.ELASTICSEARCH_URL || '';
 const ES_KEY = process.env.ELASTICSEARCH_API_KEY || '';
@@ -229,6 +231,18 @@ const es = ES_URL && ES_KEY
       requestTimeout: APIFY_REQUEST_TIMEOUT_MS,
     })
   : null;
+
+const sseClients = new Set();
+let autoScanTimer = null;
+let autoScanIntervalMs = 0;
+let autoScanRunning = false;
+
+function broadcastEvent(event, data) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const client of sseClients) {
+    client.write(payload);
+  }
+}
 
 const state = {
   lastRunAt: null,
@@ -300,9 +314,10 @@ async function persistDocuments(docs) {
   await es.bulk({ refresh: true, body });
 }
 
-async function runActor(actorId, input) {
+async function runActor(actorId, input, timeoutMsOverride = null) {
   if (!actorId || !APIFY_TOKEN) return [];
 
+  const clientTimeoutMs = timeoutMsOverride || APIFY_TIMEOUT_MS;
   const url = `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}/run-sync-get-dataset-items`;
   const request = {
     method: 'post',
@@ -311,8 +326,14 @@ async function runActor(actorId, input) {
       Authorization: `Bearer ${APIFY_TOKEN}`,
       'content-type': 'application/json',
     },
-    params: { token: APIFY_TOKEN },
-    timeout: APIFY_TIMEOUT_MS,
+    params: {
+      token: APIFY_TOKEN,
+      // Hard spend cap per actor call so a runaway scan can't burn through Apify credits.
+      maxTotalChargeUsd: APIFY_MAX_CHARGE_USD,
+      // Give the actor run itself close to the full HTTP window so slow crawls don't get killed mid-run.
+      timeout: Math.max(10, Math.round(clientTimeoutMs / 1000) - 5),
+    },
+    timeout: clientTimeoutMs,
     data: input,
   };
 
@@ -424,6 +445,9 @@ function sanitizeTargets(targets) {
         officialSources: target.officialSources || [],
         rumorInput: target.rumorInput || {},
         officialInput: target.officialInput || {},
+        officialBlogActorId: target.officialBlogActorId || '',
+        officialBlogSources: target.officialBlogSources || [],
+        officialBlogInput: target.officialBlogInput || {},
       };
     })
     .filter((target) => target.company && target.rumorActorId && target.officialActorId);
@@ -446,7 +470,15 @@ async function collectByType(targets, sourceType, runtimeInput = null) {
 
     if (!actorId || !input || Object.keys(input).length === 0) continue;
 
-    const items = await runActor(actorId, input);
+    const timeoutOverride = sourceType === 'officialBlog' ? APIFY_BLOG_TIMEOUT_MS : null;
+    let items = [];
+    try {
+      items = await runActor(actorId, input, timeoutOverride);
+    } catch (error) {
+      // A slow/unreachable blog crawl shouldn't sink the whole scan — log and continue with what we have.
+      console.error(`[collectByType] ${sourceType} actor failed for ${target.company}:`, error?.response?.data || error.message);
+      continue;
+    }
     const normalized = items.map((item) => normalizeItem(item, target.company, sourceType, target.sourceName || target.company));
 
     for (const doc of normalized) {
@@ -617,6 +649,132 @@ function scoreRumor(rawScore, lagDays, rumorText, rumorAt) {
   };
 }
 
+app.get('/api/esql', async (_req, res) => {
+  if (!es) {
+    return res.status(503).json({ ok: false, error: 'Elasticsearch is not configured.' });
+  }
+
+  // ES|QL: a distinct query surface from the DSL aggregations in /api/trends, using Elasticsearch's
+  // pipe-based query language for a company leaderboard by rumor volume and average rumor text length.
+  const query = [
+    `FROM ${ES_INDEX}`,
+    'WHERE sourceType == "rumor"',
+    'EVAL text_len = LENGTH(text)',
+    'STATS rumor_count = COUNT(*), avg_text_len = ROUND(AVG(text_len)) BY company',
+    'SORT rumor_count DESC',
+  ].join(' | ');
+
+  try {
+    const result = await es.transport.request({
+      method: 'POST',
+      path: '/_query',
+      body: { query },
+    });
+
+    const columns = result?.columns || [];
+    const values = result?.values || [];
+    const rows = values.map((row) =>
+      Object.fromEntries(row.map((value, index) => [columns[index]?.name || `col${index}`, value])),
+    );
+
+    res.json({ ok: true, query, columns: columns.map((c) => c.name), rows });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      query,
+      error: error?.meta?.body?.error || error.message || 'ES|QL query failed',
+    });
+  }
+});
+
+app.get('/api/trends', async (_req, res) => {
+  if (!es) {
+    return res.status(503).json({ ok: false, error: 'Elasticsearch is not configured.' });
+  }
+
+  try {
+    const result = await es.search({
+      index: ES_INDEX,
+      size: 0,
+      aggs: {
+        rumor_volume_by_day: {
+          filter: { term: { sourceType: 'rumor' } },
+          aggs: {
+            by_day: {
+              date_histogram: { field: 'publishedAt', calendar_interval: 'day', min_doc_count: 0 },
+              aggs: {
+                doc_count_metric: { value_count: { field: 'publishedAt' } },
+              },
+            },
+            volume_trend: { change_point: { buckets_path: 'by_day>doc_count_metric' } },
+          },
+        },
+        trending_rumor_terms: {
+          filter: { term: { sourceType: 'rumor' } },
+          aggs: {
+            terms: {
+              significant_text: {
+                field: 'text',
+                size: 12,
+                filter_duplicate_text: true,
+                exclude: ['https', 'http', 't.co', 'rt', 'we', 'our', 'us', 'i', 'you', 'the', 'a', 'an', 'and', 'to', 'of', 'in', 'is', 'it', 'this', 'that', 'are', 'be', 'on', 'for', 'with', 'can', "we're", "we've", "it's", "we’re", "we’ve", "it’s"],
+                min_doc_count: 2,
+              },
+            },
+          },
+        },
+        company_activity: {
+          terms: { field: 'company', size: 20 },
+          aggs: {
+            rumor_count: { filter: { term: { sourceType: 'rumor' } } },
+            official_count: { filter: { term: { sourceType: 'official' } } },
+          },
+        },
+      },
+    });
+
+    const aggs = result?.aggregations || {};
+
+    const volumeByDay = (aggs.rumor_volume_by_day?.by_day?.buckets || []).map((bucket) => ({
+      day: bucket.key_as_string,
+      count: bucket.doc_count,
+    }));
+
+    const changePoint = aggs.rumor_volume_by_day?.volume_trend?.type
+      ? {
+          type: Object.keys(aggs.rumor_volume_by_day.volume_trend.type)[0] || null,
+          detail: aggs.rumor_volume_by_day.volume_trend.type[Object.keys(aggs.rumor_volume_by_day.volume_trend.type)[0]] || null,
+          bucket: aggs.rumor_volume_by_day.volume_trend.bucket || null,
+        }
+      : null;
+
+    const trendingTerms = (aggs.trending_rumor_terms?.terms?.buckets || []).map((bucket) => ({
+      term: bucket.key,
+      score: Math.round((bucket.score || 0) * 1000) / 1000,
+      docCount: bucket.doc_count,
+    }));
+
+    const companyActivity = (aggs.company_activity?.buckets || []).map((bucket) => ({
+      company: bucket.key,
+      rumorCount: bucket.rumor_count?.doc_count || 0,
+      officialCount: bucket.official_count?.doc_count || 0,
+    })).sort((a, b) => b.rumorCount - a.rumorCount);
+
+    res.json({
+      ok: true,
+      volumeByDay,
+      changePoint,
+      trendingTerms,
+      companyActivity,
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error?.meta?.body?.error || error.message || 'Failed to compute trends',
+    });
+  }
+});
+
 app.get('/api/health', async (_req, res) => {
   let elasticHealthy = false;
   if (es) {
@@ -651,17 +809,45 @@ app.get('/api/latest', (_req, res) => {
   });
 });
 
-app.post('/api/scan', async (_req, res) => {
-  try {
-    const body = _req.body || {};
-    const queryConfirm = toSafeInt(body.confirm ?? _req.query.confirm, CONFIRM_THRESHOLD, 30, 95);
-    const queryLikely = toSafeInt(body.likely ?? _req.query.likely, LIKELY_THRESHOLD, 20, 90);
-    const confirmThreshold = clamp(Math.max(queryConfirm, 35), 30, 95);
-    const likelyThreshold = clamp(Math.min(queryLikely, confirmThreshold - 5), 20, 90);
-    const maxSignals = toSafeInt(body.maxSignals ?? _req.query.maxSignals, 25, 1, 100);
-    const rumorPosts = toSafeInt(body.rumorPosts ?? body.maxPosts ?? _req.query.rumorPosts ?? _req.query.maxPosts, APIFY_MAX_POSTS_DEFAULT, 3, 80);
-    const officialPosts = toSafeInt(body.officialPosts ?? body.maxPosts ?? _req.query.officialPosts ?? _req.query.maxPosts, APIFY_MAX_POSTS_DEFAULT, 3, 120);
+function signalKey(signal) {
+  return `${signal.company}|${signal.rumorUrl || signal.rumorTitle}`;
+}
 
+const STATUS_RANK = { watching: 0, likely: 1, confirmed: 2 };
+
+function detectStatusFlips(previousSignals, nextSignals) {
+  const previousByKey = new Map((previousSignals || []).map((s) => [signalKey(s), s]));
+  const flips = [];
+
+  for (const signal of nextSignals) {
+    const prev = previousByKey.get(signalKey(signal));
+    const prevRank = prev ? STATUS_RANK[prev.status] ?? 0 : -1;
+    const nextRank = STATUS_RANK[signal.status] ?? 0;
+    if (nextRank > prevRank && (signal.status === 'confirmed' || signal.status === 'likely')) {
+      flips.push({
+        company: signal.company,
+        status: signal.status,
+        previousStatus: prev ? prev.status : 'new',
+        confidence: signal.confidence,
+        rumorTitle: signal.rumorTitle,
+        rumorUrl: signal.rumorUrl,
+        officialUrl: signal.officialUrl,
+        officialTitle: signal.officialTitle,
+      });
+    }
+  }
+
+  return flips;
+}
+
+async function performScan(options = {}) {
+  const confirmThreshold = clamp(Math.max(toSafeInt(options.confirm, CONFIRM_THRESHOLD, 30, 95), 35), 30, 95);
+  const likelyThreshold = clamp(Math.min(toSafeInt(options.likely, LIKELY_THRESHOLD, 20, 90), confirmThreshold - 5), 20, 90);
+  const maxSignals = toSafeInt(options.maxSignals, 25, 1, 100);
+  const rumorPosts = toSafeInt(options.rumorPosts, APIFY_MAX_POSTS_DEFAULT, 3, 80);
+  const officialPosts = toSafeInt(options.officialPosts, APIFY_MAX_POSTS_DEFAULT, 3, 120);
+
+  {
     const runtimeInputs = {
       __hackathonRuntime: {
         rumorPosts,
@@ -671,7 +857,17 @@ app.post('/api/scan', async (_req, res) => {
 
     const targets = sanitizeTargets(await loadTargets());
     const rumorDocs = await collectByType(targets, 'rumor', runtimeInputs);
-    const officialDocs = await collectByType(targets, 'official', runtimeInputs);
+    const officialSocialDocs = await collectByType(targets, 'official', runtimeInputs);
+    const officialBlogDocsRaw = await collectByType(targets, 'officialBlog', runtimeInputs);
+    // Official company blog posts are a much stronger "reality" signal than a random LinkedIn post,
+    // so they're folded into the same official corpus (tagged with their own sourceName) rather than
+    // treated as a separate bucket.
+    const officialBlogDocs = officialBlogDocsRaw.map((doc) => ({
+      ...doc,
+      sourceType: 'official',
+      sourceName: `${doc.company} Blog`,
+    }));
+    const officialDocs = [...officialSocialDocs, ...officialBlogDocs];
     const allDocs = [...rumorDocs, ...officialDocs];
 
     const sortedRaw = allDocs
@@ -725,9 +921,13 @@ app.post('/api/scan', async (_req, res) => {
       likely: likelyThreshold,
     }, state.lastRunSummary);
 
-    state.signals = scoredSignals
+    const previousSignals = state.signals;
+    const nextSignals = scoredSignals
       .sort((a, b) => b.confidence - a.confidence)
       .slice(0, maxSignals);
+    const flips = detectStatusFlips(previousSignals, nextSignals);
+
+    state.signals = nextSignals;
     state.lastRunAt = new Date().toISOString();
     state.lastRunSummary = {
       ...state.summary,
@@ -747,14 +947,34 @@ app.post('/api/scan', async (_req, res) => {
       likely: likelyThreshold,
     };
 
-    res.json({
+    const payload = {
       ok: true,
       scannedAt: state.lastRunAt,
       missingEnv,
       signals: state.signals,
       raw: state.raw.slice(0, 60),
       summary: state.summary,
-    });
+    };
+
+    broadcastEvent('scan-complete', { scannedAt: state.lastRunAt, summary: state.summary });
+    flips.forEach((flip) => broadcastEvent('alert', flip));
+
+    return payload;
+  }
+}
+
+app.post('/api/scan', async (_req, res) => {
+  try {
+    const body = _req.body || {};
+    const options = {
+      confirm: body.confirm ?? _req.query.confirm,
+      likely: body.likely ?? _req.query.likely,
+      maxSignals: body.maxSignals ?? _req.query.maxSignals,
+      rumorPosts: body.rumorPosts ?? body.maxPosts ?? _req.query.rumorPosts ?? _req.query.maxPosts,
+      officialPosts: body.officialPosts ?? body.maxPosts ?? _req.query.officialPosts ?? _req.query.maxPosts,
+    };
+    const payload = await performScan(options);
+    res.json(payload);
   } catch (error) {
     res.status(500).json({
       ok: false,
@@ -762,6 +982,51 @@ app.post('/api/scan', async (_req, res) => {
       error: error?.response?.data || error.message || 'Unknown error',
     });
   }
+});
+
+app.get('/api/events', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.write(`event: connected\ndata: ${JSON.stringify({ autoScanEnabled: Boolean(autoScanTimer), autoScanIntervalMs })}\n\n`);
+
+  sseClients.add(res);
+  req.on('close', () => {
+    sseClients.delete(res);
+  });
+});
+
+app.post('/api/autoscan', async (req, res) => {
+  const body = req.body || {};
+  const enabled = Boolean(body.enabled);
+  const intervalMs = clamp(toSafeInt(body.intervalMs, 120000, 30000, 3_600_000), 30000, 3_600_000);
+
+  if (autoScanTimer) {
+    clearInterval(autoScanTimer);
+    autoScanTimer = null;
+  }
+
+  if (enabled) {
+    autoScanIntervalMs = intervalMs;
+    autoScanTimer = setInterval(async () => {
+      if (autoScanRunning) return;
+      autoScanRunning = true;
+      try {
+        await performScan(state.summary?.config || {});
+      } catch (error) {
+        broadcastEvent('scan-error', { error: error?.response?.data || error.message || 'Auto-scan failed' });
+      } finally {
+        autoScanRunning = false;
+      }
+    }, intervalMs);
+  } else {
+    autoScanIntervalMs = 0;
+  }
+
+  broadcastEvent('autoscan-status', { enabled, intervalMs: enabled ? intervalMs : 0 });
+  res.json({ ok: true, enabled, intervalMs: enabled ? intervalMs : 0 });
 });
 
 app.listen(PORT, () => {

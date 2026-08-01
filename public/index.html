@@ -10,12 +10,54 @@
     <main>
       <section class="panel hero">
         <h1>Rumor → Reality Launch Radar</h1>
-        <p class="subtle">Apify + Elasticsearch scanner: detect which rumors are already becoming reality.</p>
+        <p class="subtle">A launch-readiness scorecard that turns live social chatter into executive-ready signals: what is still a rumor, what is confirmed, and what to escalate.</p>
+
+        <div id="kpiStrip" class="kpi-strip hidden" aria-live="polite">
+          <article class="kpi-primary">
+            <div class="kpi-primary-head">
+              <span class="kpi-label">Scanned signals</span>
+              <span id="kpiSignalsTrend" class="kpi-trend hidden"></span>
+            </div>
+            <div class="kpi-value-wrap kpi-value-main">
+              <strong id="kpiSignals">0</strong>
+              <span class="kpi-subtle">signals this run</span>
+            </div>
+            <div id="kpiSignalsSpark" class="kpi-sparkline" aria-label="Scanned signal sparkline" role="img"></div>
+          </article>
+          <aside class="kpi-ticker">
+            <div class="ticker-row">
+              <span class="ticker-label">CONFIRMED</span>
+              <span class="ticker-value"><strong id="kpiConfirmed">0</strong></span>
+              <span id="kpiConfirmedTrend" class="ticker-trend kpi-trend hidden"></span>
+            </div>
+            <div class="ticker-row">
+              <span class="ticker-label">LIKELY</span>
+              <span class="ticker-value"><strong id="kpiLikely">0</strong></span>
+              <span id="kpiLikelyTrend" class="ticker-trend kpi-trend hidden"></span>
+            </div>
+            <div class="ticker-row">
+              <span class="ticker-label">WATCHING</span>
+              <span class="ticker-value"><strong id="kpiWatching">0</strong></span>
+              <span id="kpiWatchingTrend" class="ticker-trend kpi-trend hidden"></span>
+            </div>
+            <div class="ticker-row">
+              <span class="ticker-label">TARGETS</span>
+              <span class="ticker-value"><strong id="kpiTargets">0</strong></span>
+              <span id="kpiTargetsTrend" class="ticker-trend kpi-trend hidden"></span>
+            </div>
+            <div class="ticker-row">
+              <span class="ticker-label">CONFIRM FLOOR</span>
+              <span class="ticker-value"><strong id="kpiFloor">--</strong></span>
+              <span class="ticker-trend ticker-note">threshold</span>
+            </div>
+          </aside>
+        </div>
 
         <div class="controls">
           <button id="scanBtn">Run scan</button>
           <button id="refreshBtn">Refresh latest</button>
           <button id="healthBtn">Health check</button>
+          <span id="scanDuration" class="scan-duration hidden" aria-live="polite"></span>
           <span id="scanBadge" class="scan-badge" aria-live="polite"></span>
           <span id="statusWrap" class="status-wrap">
             <span id="statusSpinner" class="status-spinner" aria-hidden="true"></span>
@@ -25,76 +67,102 @@
 
         <div class="scan-controls">
           <div class="control-field">
-            <label for="confirmRange">Confirm threshold <span id="confirmRangeValue" class="slider-value">48</span></label>
+            <label for="confirmRange">
+              Confirm threshold
+              <span id="confirmRangeValue" class="slider-value">48</span>
+            </label>
             <input id="confirmRange" type="range" min="35" max="95" step="1" value="48" />
           </div>
           <div class="control-field">
-            <label for="likelyRange">Likely threshold <span id="likelyRangeValue" class="slider-value">40</span></label>
+            <label for="likelyRange">
+              Likely threshold
+              <span id="likelyRangeValue" class="slider-value">40</span>
+            </label>
             <input id="likelyRange" type="range" min="25" max="90" step="1" value="40" />
           </div>
           <div class="control-field">
-            <label for="rumorPosts">Rumor posts per company</label>
+            <label for="rumorPosts">
+              Rumor posts per company
+              <span id="rumorPostsValue" class="slider-value">12</span>
+            </label>
             <input id="rumorPosts" type="range" min="6" max="30" step="1" value="12" />
-            <span id="rumorPostsValue" class="slider-value">12</span>
           </div>
           <div class="control-field">
-            <label for="officialPosts">Reality posts per company</label>
+            <label for="officialPosts">
+              Reality posts per company
+              <span id="officialPostsValue" class="slider-value">12</span>
+            </label>
             <input id="officialPosts" type="range" min="8" max="30" step="1" value="12" />
-            <span id="officialPostsValue" class="slider-value">12</span>
           </div>
           <div class="control-field">
-            <label for="signalLimit">Signal cards</label>
+            <label for="signalLimit">
+              Signal cards
+              <span id="signalLimitValue" class="slider-value">25</span>
+            </label>
             <input id="signalLimit" type="range" min="6" max="40" step="1" value="25" />
-            <span id="signalLimitValue" class="slider-value">25</span>
           </div>
         </div>
 
         <p id="missing" class="notice hidden"></p>
 
         <div id="statusFilterRow" class="status-filter" role="tablist" aria-label="Filter signal status">
-          <button id="filterAll" class="filter-btn active" data-filter="all" type="button">All</button>
+          <button id="filterAll" class="filter-btn active" data-filter="all" type="button">All signals</button>
           <button id="filterConfirmed" class="filter-btn" data-filter="confirmed" type="button">Confirmed</button>
           <button id="filterLikely" class="filter-btn" data-filter="likely" type="button">Likely</button>
           <button id="filterWatching" class="filter-btn" data-filter="watching" type="button">Watching</button>
         </div>
+        <div id="presetRow" class="status-filter preset-row" role="group" aria-label="Scan presets">
+          <button id="presetBalanced" class="filter-btn" type="button" data-preset="balanced">Balanced</button>
+          <button id="presetPrecision" class="filter-btn" type="button" data-preset="precision">Precision (tight)</button>
+          <button id="presetRecall" class="filter-btn" type="button" data-preset="recall">Recall (broad)</button>
+        </div>
 
-        <div id="summary" class="summary hidden">
-          <div><strong>Scanned:</strong> <span id="summaryScanned">--</span></div>
-          <div><strong>Targets:</strong> <span id="summaryTargets">0</span></div>
-          <div><strong>Signals:</strong> <span id="summarySignals">0</span></div>
-          <div><strong>Confirmed:</strong> <span id="summaryConfirmed">0</span></div>
-          <div><strong>Likely:</strong> <span id="summaryLikely">0</span></div>
-          <div><strong>Watching:</strong> <span id="summaryWatching">0</span></div>
-          <div><strong>Confirm threshold:</strong> <span id="summaryConfirmThreshold">--</span></div>
-          <div><strong>Likely threshold:</strong> <span id="summaryLikelyThreshold">--</span></div>
-          <div><strong>Posts/call:</strong> <span id="summaryPostsSummary">-- / --</span></div>
-          <div><strong>Δ since last:</strong> <span id="summaryDelta">--</span></div>
+        <div id="summary" class="summary summary-compact hidden">
+          <p id="summaryHeadline" class="summary-headline">Ready to run your first scan.</p>
+          <ul id="summaryBullets" class="summary-bullets"></ul>
+        </div>
+        <div id="confidenceStrip" class="confidence-strip hidden" aria-live="polite">
+          <div class="confidence-title">Confidence distribution (last run)</div>
+          <div id="confidenceBars" class="confidence-bars" role="img" aria-label="Confidence distribution chart"></div>
+          <div id="confidenceLegend" class="confidence-legend">
+            <span>0-49</span>
+            <span>50-59</span>
+            <span>60-69</span>
+            <span>70-79</span>
+            <span>80+</span>
+          </div>
         </div>
 
         <div id="statusLegend" class="status-legend" aria-label="status legend">
-          <span class="legend-item"><span class="legend-dot legend-confirmed"></span>confirmed</span>
-          <span class="legend-item"><span class="legend-dot legend-likely"></span>likely</span>
-          <span class="legend-item"><span class="legend-dot legend-watching"></span>watching</span>
+          <span class="legend-item"><span class="legend-dot legend-confirmed"></span>Confirmed</span>
+          <span class="legend-item"><span class="legend-dot legend-likely"></span>Likely</span>
+          <span class="legend-item"><span class="legend-dot legend-watching"></span>Watching</span>
         </div>
 
         <div id="onboardingCue" class="onboarding-cue" role="note">
-          1) Click <strong>Run scan</strong><br />
-          2) Watch <strong>Signal spotlight</strong> for best evidence<br />
-          3) Use <strong>Copy summary</strong> to share a judge-ready recap
+          1) Click <strong>Run scan</strong> to pull fresh rumor and official signals.<br />
+          2) Open <strong>Signal spotlight</strong> to review the strongest matched evidence first.<br />
+          3) Click <strong>Copy judge-ready summary</strong> for a clean recap you can paste into Slack or Notion.
         </div>
 
         <div id="scanTimeline" class="scan-timeline hidden" aria-live="polite">
           <div class="scan-timeline-title">Scan progress</div>
           <div id="scanSteps" class="scan-steps"></div>
         </div>
+
+        <div class="shortcuts-note" aria-label="Keyboard shortcuts">
+          <span>Hotkeys:</span>
+          <code>⌘/Ctrl+R</code> run scan · <code>R</code> refresh · <code>H</code> health check ·
+          <code>1</code> confirmed · <code>2</code> likely · <code>3</code> watching · <code>0</code> all
+        </div>
       </section>
 
       <section id="narrativePanel" class="panel hidden">
         <div class="panel-head">
-          <h2>What this run means</h2>
-          <button id="copySummaryBtn" type="button" class="ghost-btn">Copy summary</button>
+          <h2>What this scan means</h2>
+          <button id="copySummaryBtn" type="button" class="ghost-btn">Copy judge-ready summary</button>
         </div>
-        <p id="narrativeText" class="narrative">Waiting for data...</p>
+        <p id="narrativeText" class="narrative">Waiting on your first completed scan. Kick off one run to generate your baseline.</p>
       </section>
 
       <section id="spotlightPanel" class="panel spotlight hidden">
@@ -104,14 +172,44 @@
         <div id="topOfficialSources" class="official-sources hidden"></div>
       </section>
 
+      <section id="decisionRailPanel" class="panel decision-rail hidden" aria-live="polite">
+        <div class="panel-head">
+          <div>
+            <h2>Decision rail</h2>
+            <p class="rail-subtitle">Executive status by bucket with top evidence for each outcome.</p>
+          </div>
+          <span id="decisionRailMode" class="rail-mode">Executive alert</span>
+        </div>
+        <div id="decisionRailCounts" class="rail-counts" aria-live="polite"></div>
+        <div id="decisionRailBody" class="decision-rail-body"></div>
+      </section>
+
+      <section id="marketSignalsPanel" class="panel market-signals hidden">
+        <div class="panel-head">
+          <div>
+            <h2>Market signal context (Elasticsearch)</h2>
+            <p class="rail-subtitle">Rumor velocity, language drift, and per-company activity from one live ES trend sweep.</p>
+          </div>
+        </div>
+        <div id="marketSignalsBody" class="market-signals-body"></div>
+      </section>
+
       <section class="panel">
         <h2>Top signals</h2>
         <div id="signals" class="grid"></div>
       </section>
 
       <section class="panel">
-        <h2>Raw feed</h2>
+        <h2>Source feed</h2>
         <div id="raw" class="list"></div>
+      </section>
+
+      <section id="eventFeedPanel" class="panel terminal-feed hidden" aria-live="polite" aria-label="Elasticsearch ingestion log">
+        <div class="panel-head">
+          <h2>Elasticsearch ingestion log</h2>
+          <span id="terminalMode" class="terminal-mode-chip">live</span>
+        </div>
+        <div id="terminalTicker" class="terminal-ticker" role="log"></div>
       </section>
     </main>
 
@@ -130,16 +228,8 @@
       const refreshBtn = document.getElementById('refreshBtn');
       const healthBtn = document.getElementById('healthBtn');
 
-      const summaryScanned = document.getElementById('summaryScanned');
-      const summaryTargets = document.getElementById('summaryTargets');
-      const summarySignals = document.getElementById('summarySignals');
-      const summaryConfirmed = document.getElementById('summaryConfirmed');
-      const summaryLikely = document.getElementById('summaryLikely');
-      const summaryWatching = document.getElementById('summaryWatching');
-      const summaryConfirmThreshold = document.getElementById('summaryConfirmThreshold');
-      const summaryLikelyThreshold = document.getElementById('summaryLikelyThreshold');
-      const summaryPostsSummary = document.getElementById('summaryPostsSummary');
-      const summaryDelta = document.getElementById('summaryDelta');
+      const summaryHeadline = document.getElementById('summaryHeadline');
+      const summaryBullets = document.getElementById('summaryBullets');
       const scanTimelineEl = document.getElementById('scanTimeline');
       const scanStepsEl = document.getElementById('scanSteps');
       const narrativePanel = document.getElementById('narrativePanel');
@@ -148,9 +238,30 @@
       const spotlightSignal = document.getElementById('spotlightSignal');
       const topSignalCompare = document.getElementById('topSignalCompare');
       const copySummaryBtn = document.getElementById('copySummaryBtn');
+      const scanDurationEl = document.getElementById('scanDuration');
       const runDigestEl = document.getElementById('runDigest');
       const onboardingCue = document.getElementById('onboardingCue');
       const topOfficialSourcesEl = document.getElementById('topOfficialSources');
+      const decisionRailPanel = document.getElementById('decisionRailPanel');
+      const decisionRailBody = document.getElementById('decisionRailBody');
+      const decisionRailMode = document.getElementById('decisionRailMode');
+      const decisionRailCounts = document.getElementById('decisionRailCounts');
+      const eventFeedPanel = document.getElementById('eventFeedPanel');
+      const terminalTickerEl = document.getElementById('terminalTicker');
+      const terminalMode = document.getElementById('terminalMode');
+      const kpiStrip = document.getElementById('kpiStrip');
+      const kpiSignals = document.getElementById('kpiSignals');
+      const kpiSignalsSpark = document.getElementById('kpiSignalsSpark');
+      const kpiConfirmed = document.getElementById('kpiConfirmed');
+      const kpiLikely = document.getElementById('kpiLikely');
+      const kpiWatching = document.getElementById('kpiWatching');
+      const kpiTargets = document.getElementById('kpiTargets');
+      const kpiSignalsTrend = document.getElementById('kpiSignalsTrend');
+      const kpiConfirmedTrend = document.getElementById('kpiConfirmedTrend');
+      const kpiLikelyTrend = document.getElementById('kpiLikelyTrend');
+      const kpiWatchingTrend = document.getElementById('kpiWatchingTrend');
+      const kpiTargetsTrend = document.getElementById('kpiTargetsTrend');
+      const kpiFloor = document.getElementById('kpiFloor');
       const confirmRange = document.getElementById('confirmRange');
       const likelyRange = document.getElementById('likelyRange');
       const rumorPostsInput = document.getElementById('rumorPosts');
@@ -165,9 +276,16 @@
       const filterConfirmedBtn = document.getElementById('filterConfirmed');
       const filterLikelyBtn = document.getElementById('filterLikely');
       const filterWatchingBtn = document.getElementById('filterWatching');
+      const presetBalancedBtn = document.getElementById('presetBalanced');
+      const presetPrecisionBtn = document.getElementById('presetPrecision');
+      const presetRecallBtn = document.getElementById('presetRecall');
 
       const statusFilterButtons = [filterAllBtn, filterConfirmedBtn, filterLikelyBtn, filterWatchingBtn].filter(Boolean);
+      const presetButtons = [presetBalancedBtn, presetPrecisionBtn, presetRecallBtn].filter(Boolean);
       let activeSignalFilter = 'all';
+      const signalHistory = [];
+      const terminalLines = [];
+      const LOG_MAX_LINES = 140;
 
       function setNotice(msg) {
         if (msg) {
@@ -179,33 +297,257 @@
         }
       }
 
+      function statusLabel(status) {
+        return String(status || 'watching')
+          .toLowerCase()
+          .replace(/^\w/, (match) => match.toUpperCase());
+      }
+
+      function formatCountText(value, singular, plural = `${singular}s`) {
+        const count = Number.isFinite(Number(value)) ? Number(value) : 0;
+        return `${count} ${count === 1 ? singular : plural}`;
+      }
+
+      function formatLag(days) {
+        const value = Number(days);
+        if (!Number.isFinite(value)) return 'unconfirmed';
+        return `${value} day${value === 1 ? '' : 's'}`;
+      }
+
+      function trendChip(value, label) {
+        const delta = Number(value) || 0;
+        if (delta > 0) {
+          return `<span class="trend-chip trend-up" title="${label} from last run">↗ +${delta}</span>`;
+        }
+        if (delta < 0) {
+          return `<span class="trend-chip trend-down" title="${label} from last run">↘ ${delta}</span>`;
+        }
+        return `<span class="trend-chip trend-flat" title="${label} from last run">→ 0</span>`;
+      }
+
+      function trendChipWithPercent(delta, label, currentValue = null) {
+        const value = Number(delta || 0);
+        const total = Number(currentValue);
+        const sign = value > 0 ? '+' : '';
+        if (!Number.isFinite(total)) {
+          return trendChip(value, label);
+        }
+        const prior = total - value;
+        if (prior > 0) {
+          const pct = Math.round((Math.abs(value) / prior) * 100);
+          if (value > 0) {
+            return `<span class="trend-chip trend-up" title="${label} from last run">↗ ${sign}${value} (+${pct}%)</span>`;
+          }
+          if (value < 0) {
+            return `<span class="trend-chip trend-down" title="${label} from last run">↘ ${value} (${pct}%)</span>`;
+          }
+        }
+        return trendChip(value, label);
+      }
+
+      function terminalStamp() {
+        return new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        });
+      }
+
+      function pushTerminalLine(message, level = 'info', runId = null, ts = terminalStamp()) {
+        if (!terminalTickerEl || !eventFeedPanel) return;
+        if (runId !== null && runId !== activeScanRunId) return;
+
+        const text = htmlEscape(String(message || '').replace(/\n/g, ' '));
+        const line = document.createElement('div');
+        line.className = `terminal-line terminal-line-${level}`;
+        line.innerHTML = `<span class="terminal-ts">[${ts}]</span><span>${text}</span>`;
+        terminalTickerEl.appendChild(line);
+        terminalLines.push(line);
+
+        while (terminalLines.length > LOG_MAX_LINES && terminalLines.length) {
+          const stale = terminalLines.shift();
+          stale.remove();
+        }
+
+        terminalTickerEl.scrollTop = terminalTickerEl.scrollHeight;
+        eventFeedPanel.classList.remove('hidden');
+        if (terminalMode) terminalMode.textContent = 'live';
+      }
+
+      function recordScanLog(level, message, runId) {
+        pushTerminalLine(`[scan] ${message}`, level, runId);
+      }
+
+      function recordElasticLog(message, runId) {
+        pushTerminalLine(`[es] ${message}`, 'es', runId);
+      }
+
+      function renderElasticSummary(payload, runId) {
+        if (runId !== activeScanRunId) return;
+        const summary = payload?.summary || {};
+        const raw = Array.isArray(payload?.raw) ? payload.raw : [];
+        const rumorDocs = Number(summary.rumorDocs || 0);
+        const officialDocs = Number(summary.officialDocs || 0);
+        const rawRumor = raw.filter((item) => String(item?.sourceType || '').toLowerCase() === 'rumor').length;
+        const rawOfficial = raw.filter((item) => String(item?.sourceType || '').toLowerCase() === 'official').length;
+
+        recordScanLog('info', `scan complete at ${terminalStamp()} for ${summary.scannedTargets || 0} target${summary.scannedTargets === 1 ? '' : 's'}.`, runId);
+        recordElasticLog(`collected ${Number.isFinite(rumorDocs) ? rumorDocs : rawRumor} rumor docs`, runId);
+        recordElasticLog(`collected ${Number.isFinite(officialDocs) ? officialDocs : rawOfficial} official docs`, runId);
+        recordElasticLog(`bulk indexed ${raw.length} docs into rumor-reality-radar`, runId);
+        recordScanLog('info', `signal pipeline surfaced ${summary.totalSignals || 0} match candidates`, runId);
+      }
+
+      function updateSignalSparkline(values) {
+        if (!kpiSignalsSpark) return;
+        const points = values.slice(-10);
+        if (!points.length) {
+          kpiSignalsSpark.innerHTML = '';
+          return;
+        }
+        const max = Math.max(1, ...points.map((value) => Number(value) || 0));
+        kpiSignalsSpark.innerHTML = points
+          .map((value) => {
+            const normalized = Math.max(6, Math.round(((Number(value) || 0) / max) * 100));
+            return `<span style="--spark-h:${normalized}%"></span>`;
+          })
+          .join('');
+      }
+
+      function formatSigned(value, withSign = true) {
+        const num = Number(value || 0);
+        if (num === 0) return '0';
+        return `${num > 0 && withSign ? '+' : ''}${num}`;
+      }
+
+      function confidenceBand(value) {
+        const score = Number(value) || 0;
+        if (score >= 82) return 'high';
+        if (score >= 68) return 'strong';
+        if (score >= 52) return 'moderate';
+        return 'early';
+      }
+
+      function setTrend(el, delta, label, currentValue = null) {
+        if (!el) return;
+        if (delta === null || delta === undefined) {
+          el.classList.add('hidden');
+          el.textContent = '';
+          return;
+        }
+        el.classList.remove('hidden');
+        el.innerHTML = trendChipWithPercent(delta, label, currentValue);
+      }
+
+      function statusLineFromSignals(signals) {
+        const counts = { confirmed: 0, likely: 0, watching: 0 };
+        (signals || []).forEach((signal) => {
+          const status = String(signal.status || 'watching');
+          if (Object.prototype.hasOwnProperty.call(counts, status)) {
+            counts[status] += 1;
+          }
+        });
+        return counts;
+      }
+
       function setSummary(summary) {
         summaryEl.classList.remove('hidden');
-        summaryScanned.textContent = summary.scannedAt ? new Date(summary.scannedAt).toLocaleString() : '--';
-        summaryTargets.textContent = summary.scannedTargets || 0;
-        summarySignals.textContent = summary.totalSignals || 0;
-        summaryConfirmed.textContent = summary.confirmed || 0;
-        summaryLikely.textContent = summary.likely || 0;
-        summaryWatching.textContent = summary.watching || 0;
+        const scannedTargets = summary.scannedTargets || 0;
+        const totalSignals = summary.totalSignals || 0;
+        const confirmed = summary.confirmed || 0;
+        const likely = summary.likely || 0;
+        const watching = summary.watching || 0;
+        const deltas = summary.deltas || null;
 
-        const rumorPostsSummary = summary.config || {};
-        summaryPostsSummary.textContent = rumorPostsSummary.rumorPosts != null && rumorPostsSummary.officialPosts != null
-          ? `${rumorPostsSummary.rumorPosts} / ${rumorPostsSummary.officialPosts}`
-          : '-- / --';
-
-        if (summary.deltas) {
-          const deltas = summary.deltas;
-          const fmt = (n) => `${n >= 0 ? '+' : ''}${n}`;
-          summaryDelta.textContent = `S ${fmt(deltas.signals)} · C ${fmt(deltas.confirmed)} · L ${fmt(deltas.likely)} · W ${fmt(deltas.watching)}`;
-        } else {
-          summaryDelta.textContent = '--';
+        if (summaryHeadline) {
+          summaryHeadline.textContent = totalSignals
+            ? `Scanned ${scannedTargets} target${scannedTargets === 1 ? '' : 's'} and surfaced ${totalSignals} signal${totalSignals === 1 ? '' : 's'} for executive review.`
+            : `Scanned ${scannedTargets} target${scannedTargets === 1 ? '' : 's'} with no clear signals yet. Run again for a fresh pass.`;
         }
 
         const configuredThresholds = summary.configuredThresholds || {};
-        summaryConfirmThreshold.textContent = configuredThresholds.confirm == null ? '--' : configuredThresholds.confirm;
-        summaryLikelyThreshold.textContent = configuredThresholds.likely == null ? '--' : configuredThresholds.likely;
+        const rumorPostsSummary = summary.config || {};
+        const bullets = [];
 
-        if (summaryPostsSummary && summaryPostsSummary.textContent && summaryPostsSummary.textContent !== '-- / --') {
+        bullets.push(
+          `Signal mix: ${formatCountText(confirmed, 'confirmed signal', 'confirmed signals')}, ${formatCountText(
+            likely,
+            'likely signal',
+            'likely signals',
+          )}, ${formatCountText(watching, 'watching signal', 'watching signals')}`,
+        );
+        bullets.push(
+          `Decision gates: confirmed at ${configuredThresholds.confirm == null ? '--' : configuredThresholds.confirm} and likely at ${
+            configuredThresholds.likely == null ? '--' : configuredThresholds.likely
+          } confidence thresholds.`,
+        );
+
+        if (deltas) {
+          bullets.push(
+            `Momentum vs last run: ${trendChipWithPercent(deltas.signals, 'Signals', totalSignals)} signals · ${trendChipWithPercent(
+              deltas.confirmed,
+              'Confirmed',
+              confirmed,
+            )} Confirmed · ${trendChipWithPercent(deltas.likely, 'Likely', likely)} Likely · ${trendChipWithPercent(deltas.watching, 'Watching', watching)} Watching`,
+          );
+          const sourceDiff =
+            Math.abs(Number(deltas.rumorDocs || 0)) || Number(deltas.officialDocs || 0)
+              ? `${trendChipWithPercent(deltas.rumorDocs, 'Rumor posts', summary.rumorDocs || 0)} rumors · ${trendChipWithPercent(
+                  deltas.officialDocs,
+                  'official posts',
+                  summary.officialDocs || 0,
+                )} official`
+              : null;
+          if (sourceDiff) {
+            bullets.push(`Source intake movement: ${sourceDiff}.`);
+          }
+        } else {
+          bullets.push(
+            `Scan depth configured: ${
+              rumorPostsSummary.rumorPosts != null && rumorPostsSummary.officialPosts != null
+                ? `${rumorPostsSummary.rumorPosts} rumor posts and ${rumorPostsSummary.officialPosts} official posts per target`
+                : '--/--'
+            }`,
+          );
+        }
+
+        if (summaryBullets) {
+          summaryBullets.innerHTML = bullets
+            .slice(0, 4)
+            .map((bullet) => `<li>${bullet}</li>`)
+            .join('');
+        }
+
+        if (deltas) {
+          setTrend(kpiSignalsTrend, deltas.signals, 'Signals', totalSignals);
+          setTrend(kpiConfirmedTrend, deltas.confirmed, 'Confirmed', confirmed);
+          setTrend(kpiLikelyTrend, deltas.likely, 'Likely', likely);
+          setTrend(kpiWatchingTrend, deltas.watching, 'Watching', watching);
+        } else {
+          setTrend(kpiSignalsTrend, null);
+          setTrend(kpiConfirmedTrend, null);
+          setTrend(kpiLikelyTrend, null);
+          setTrend(kpiWatchingTrend, null);
+        }
+        setTrend(kpiTargetsTrend, null);
+
+        if (kpiStrip) {
+          kpiStrip.classList.remove('hidden');
+          if (kpiSignals) kpiSignals.textContent = String(totalSignals);
+          if (kpiConfirmed) kpiConfirmed.textContent = String(confirmed);
+          if (kpiLikely) kpiLikely.textContent = String(likely);
+          if (kpiWatching) kpiWatching.textContent = String(watching);
+          if (kpiTargets) kpiTargets.textContent = String(summary.scannedTargets || 0);
+        }
+        signalHistory.push(totalSignals);
+        if (signalHistory.length > 10) {
+          signalHistory.shift();
+        }
+        updateSignalSparkline(signalHistory);
+
+        if (kpiFloor) kpiFloor.textContent = configuredThresholds.confirm == null ? '--' : configuredThresholds.confirm;
+
+        if (rumorPostsSummary && rumorPostsSummary.rumorPosts != null && rumorPostsSummary.officialPosts != null) {
           rumorPostsInput.value = String(rumorPostsSummary.rumorPosts || rumorPostsInput.value || 12);
           officialPostsInput.value = String(rumorPostsSummary.officialPosts || officialPostsInput.value || 12);
           rumorPostsValue.textContent = rumorPostsInput.value;
@@ -233,6 +575,7 @@
         statusEl.textContent = msg;
         statusSpinner.classList.toggle('active', isRunning);
         statusEl.classList.toggle('running', isRunning);
+        statusWrap.classList.toggle('scan-running', isRunning);
         statusWrap.classList.toggle('running', isRunning);
         scanBtn.disabled = isRunning;
         refreshBtn.disabled = isRunning;
@@ -253,7 +596,7 @@
       }
 
       function listText(items) {
-        if (!items || !items.length) return '<li class="muted">No detailed reasons available.</li>';
+        if (!items || !items.length) return '<li class="muted">No explainability notes available yet.</li>';
         return items
           .slice(0, 6)
           .map((item) => `<li>${item}</li>`)
@@ -283,16 +626,16 @@
 
       const scanPhases = [
         'Collecting rumor signals',
-        'Collecting reality posts',
-        'Running semantic match',
+        'Collecting official posts',
+        'Matching with semantic relevance',
         'Scoring and ranking',
       ];
 
       let lastKnownPayload = null;
       let timelineInterval = null;
       let activeScanRunId = 0;
+      let scanStartedAt = null;
       let runDigestTimer = null;
-      let hasRunOnce = false;
 
       function htmlEscape(value) {
         return String(value || '')
@@ -353,6 +696,46 @@
         }
       }
 
+      const SCAN_PRESETS = {
+        balanced: {
+          confirm: 48,
+          likely: 40,
+          rumorPosts: 12,
+          officialPosts: 12,
+          maxSignals: 25,
+        },
+        precision: {
+          confirm: 62,
+          likely: 52,
+          rumorPosts: 8,
+          officialPosts: 9,
+          maxSignals: 15,
+        },
+        recall: {
+          confirm: 44,
+          likely: 34,
+          rumorPosts: 20,
+          officialPosts: 22,
+          maxSignals: 35,
+        },
+      };
+
+      function applyPreset(presetName) {
+        const preset = SCAN_PRESETS[presetName];
+        if (!preset) return;
+        confirmRange.value = String(preset.confirm);
+        likelyRange.value = String(preset.likely);
+        rumorPostsInput.value = String(preset.rumorPosts);
+        officialPostsInput.value = String(preset.officialPosts);
+        signalLimitInput.value = String(preset.maxSignals);
+        confirmRangeValue.textContent = confirmRange.value;
+        likelyRangeValue.textContent = likelyRange.value;
+        rumorPostsValue.textContent = rumorPostsInput.value;
+        officialPostsValue.textContent = officialPostsInput.value;
+        signalLimitValue.textContent = signalLimitInput.value;
+        syncLikelyFloor();
+      }
+
       function getScanConfig() {
         return {
           confirm: toSafeIntValue(confirmRange.value, 48, 35, 95),
@@ -382,6 +765,7 @@
         scanTimelineEl.classList.remove('hidden');
         renderScanTimeline();
         setScanProgress(runId, 0);
+        recordScanLog('info', `starting scan sequence #${runId} · phase: ${scanPhases[0]}`, runId);
         let phaseIndex = 0;
 
         if (timelineInterval) {
@@ -397,6 +781,7 @@
           setScanProgress(runId, phaseIndex);
           const message = scanPhases[phaseIndex];
           statusEl.textContent = message;
+          recordScanLog('info', message, runId);
         }, 650);
 
         return runId;
@@ -410,6 +795,7 @@
         }
         if (success) {
           setScanProgress(runId, scanPhases.length - 1);
+          recordScanLog('info', `completed all scan phases`, runId);
           setTimeout(() => {
             if (runId === activeScanRunId) {
               scanTimelineEl.classList.add('hidden');
@@ -420,20 +806,34 @@
         }
       }
 
+      function renderScanDuration(startMs, mode) {
+        if (!scanDurationEl) return;
+        if (!Number.isFinite(startMs) || startMs <= 0) {
+          scanDurationEl.classList.add('hidden');
+          return;
+        }
+        const elapsed = Math.max(0, Date.now() - startMs);
+        const label = mode === 'failed' ? 'scan failed' : 'scan complete';
+        scanDurationEl.textContent = `${label} in ${(elapsed / 1000).toFixed(1)}s`;
+        scanDurationEl.classList.remove('hidden');
+        scanDurationEl.classList.toggle('scan-duration-fail', mode === 'failed');
+        scanDurationEl.classList.toggle('scan-duration-run', mode !== 'failed');
+      }
+
       function confidenceChipText(sig) {
         const matchSignals = sig.matchSignals || {};
         const chips = [];
         if (matchSignals.lexical !== undefined && matchSignals.lexical !== null) {
-          chips.push(`Lexical overlap: ${matchSignals.lexical}`);
+          chips.push(`Phrase overlap score: ${matchSignals.lexical}/100`);
         }
         if (matchSignals.semantic !== undefined && matchSignals.semantic !== null) {
-          chips.push(`Semantic similarity: ${matchSignals.semantic}`);
+          chips.push(`Semantic match score: ${matchSignals.semantic}/100`);
         }
         if (sig.confirmLagDays !== undefined && sig.confirmLagDays !== null) {
-          chips.push(`Lag: ${sig.confirmLagDays} day(s)`);
+          chips.push(`Lead time: ${formatLag(sig.confirmLagDays)}`);
         }
         if (matchSignals.sourceName) {
-          chips.push(`Source: ${matchSignals.sourceName}`);
+          chips.push(`Matched against: ${matchSignals.sourceName}`);
         }
         if (!chips.length) {
           return sig.confidenceSignals?.length ? sig.confidenceSignals.slice(0, 4) : [];
@@ -472,12 +872,12 @@
         }
 
         const total = summary.totalSignals || 0;
-        const topLine = `Run complete: ${total} signal(s), confirm ≥ ${confirm}, likely ≥ ${likely}.`;
+        const topLine = `Scan complete: ${total} signal${total === 1 ? '' : 's'} surfaced at confidence thresholds ${confirm} (confirmed) and ${likely} (likely).`;
         const topTwoLine = topSignals.length
-          ? `Top 2: ${topSignals
-              .map((signal) => `${signal.company || 'Unknown'} (${signal.status}) ${Number(signal.confidence) || 0}%`)
+          ? `Top 2 by confidence: ${topSignals
+              .map((signal) => `${signal.company || 'Unknown'} (${statusLabel(signal.status)}) ${Number(signal.confidence) || 0}%`)
               .join(' · ')}`
-          : 'Top 2: none yet';
+          : 'Top 2: waiting for stronger matches.';
 
         runDigestEl.textContent = `${topLine} ${topTwoLine}`;
         runDigestEl.classList.remove('hidden');
@@ -529,7 +929,7 @@
 
         topOfficialSourcesEl.classList.remove('hidden');
         topOfficialSourcesEl.innerHTML = `
-          <h3>Official sources verified</h3>
+          <h3>Most recent official evidence</h3>
           <div class="official-source-list">
             ${topSources
               .map((signal) => {
@@ -539,12 +939,12 @@
                 return `
                   <div class="official-source-row">
                     <div class="official-source-title">
-                      <span class="pill ${badgeClass(signal.status)}">${signal.status}</span>
+                      <span class="pill ${badgeClass(signal.status)}">${statusLabel(signal.status)}</span>
                       <a href="${htmlEscape(signal.officialUrl)}" target="_blank" rel="noreferrer">${htmlEscape(linkLabel)}</a>
                     </div>
                     <div class="official-source-meta">
                       <span>${htmlEscape(signal.company || 'Unknown')}</span>
-                      <span>${confidence}% match</span>
+                      <span>${confidence}% confidence</span>
                     </div>
                   </div>
                 `;
@@ -570,11 +970,13 @@
         const fastestLag = withLag.length ? Math.min(...withLag) : null;
 
         if (!totalSignals) {
-          return `No confident matches yet from ${scannedTargets} scanned target(s). Keep scanning for rumor-confirmation links.`;
+          return `No confident matches from ${scannedTargets} scanned target${scannedTargets === 1 ? '' : 's'} this cycle. Re-run when you want a fresher signal set.`;
         }
 
-        const lagText = fastestLag == null ? '' : ` Fastest confirmation: ${fastestLag} day(s).`;
-        return `Scanned ${scannedTargets} target(s) and found ${totalSignals} signal(s): ${confirmed} confirmed (≥${confirmThreshold}), ${likely} likely (≥${likelyThreshold}), ${watching} watching.${lagText}`;
+        const lagText = fastestLag == null ? '' : ` Fastest confirmation: ${formatLag(fastestLag)}.`;
+        return `Scanned ${scannedTargets} target${scannedTargets === 1 ? '' : 's'} and found ${totalSignals} signal${totalSignals === 1 ? '' : 's'}: ${confirmed} ${statusLabel(
+          'confirmed',
+        )} (≥${confirmThreshold}), ${likely} ${statusLabel('likely')} (≥${likelyThreshold}), ${watching} ${statusLabel('watching')}.${lagText}`;
       }
 
       function getRankedSignals(signals) {
@@ -600,20 +1002,26 @@
         spotlightPanel.classList.remove('hidden');
         const rankedSignals = getRankedSignals(signals);
         const topSignal = rankedSignals[0];
+        const headline = rumorTitleLine(topSignal);
+        const body = rumorBodyLine(topSignal);
 
-        const lagText = topSignal.confirmLagDays == null ? 'unconfirmed' : `${topSignal.confirmLagDays} day(s)`;
-        const reasonList = topSignal.matchingReasons && topSignal.matchingReasons.length ? listText(topSignal.matchingReasons.slice(0, 4)) : '<li class="muted">No direct reason list yet.</li>';
+        const lagText = formatLag(topSignal.confirmLagDays);
+        const reasonList =
+          topSignal.matchingReasons && topSignal.matchingReasons.length
+            ? listText(topSignal.matchingReasons.slice(0, 4))
+            : '<li class="muted">No reason list generated yet.</li>';
         const snippet = officialWhyBlock(topSignal);
 
         spotlightSignal.innerHTML = `
-          <div class="spotlight-headline">${topSignal.company} · <strong>${topSignal.status}</strong> · ${topSignal.confidence || 0}% confidence</div>
-          <p class="title">${topSignal.rumorTitle || topSignal.rumorText || 'Matched rumor signal'}</p>
-          <p class="meta">Rumor seen: ${formatDate(topSignal.rumorAt)} · Confirm lag: ${lagText}</p>
+          <div class="spotlight-headline">${topSignal.company} · <strong>${statusLabel(topSignal.status)}</strong> · ${topSignal.confidence || 0}% confidence</div>
+          <p class="title">${headline || 'Matched rumor signal'}</p>
+          ${body ? `<p class="meta">${body}</p>` : ''}
+          <p class="meta">Rumor posted: ${formatDate(topSignal.rumorAt)} · Lead time: ${lagText}</p>
           <div class="factor-row">${confidenceChipHtml(topSignal)}</div>
           <p class="why-label">Why this matched</p>
           <ul class="reason-list">${reasonList}</ul>
           ${snippet}
-          <p class="meta">${topSignal.rumorUrl ? `Source: <a href="${topSignal.rumorUrl}" target="_blank" rel="noreferrer">open rumor</a>${topSignal.officialUrl ? ` · Reality: <a href="${topSignal.officialUrl}" target="_blank" rel="noreferrer">open official</a>` : ''}` : 'Source links not available.'}</p>
+          <p class="meta">${topSignal.rumorUrl ? `Rumor source: <a href="${topSignal.rumorUrl}" target="_blank" rel="noreferrer">Open rumor post</a>${topSignal.officialUrl ? ` · Official signal: <a href="${topSignal.officialUrl}" target="_blank" rel="noreferrer">Open confirmation</a>` : ''}` : 'Source links not available.'}</p>
         `;
       }
 
@@ -633,20 +1041,27 @@
           .map((signal, index) => {
             const confidence = Math.min(100, Math.max(0, Number(signal.confidence) || 0));
             const title = rumorTitleLine(signal);
+            const leadTime = formatLag(signal.confirmLagDays);
+            const topReason =
+              signal.matchingReasons && signal.matchingReasons[0]
+                ? trimText(signal.matchingReasons[0], 96)
+                : 'No reason details yet.';
             return `
               <div class="top-signal-row">
                 <div class="top-signal-rank">#${index + 1}</div>
                 <div class="top-signal-copy">
-                  <div class="top-signal-title">${title || 'Rumor signal'}</div>
+                <div class="top-signal-title">${title || 'Rumor signal'}</div>
                   <div class="top-signal-meta">
-                    <span class="pill ${badgeClass(signal.status)}">${signal.status}</span>
+                    <span class="pill ${badgeClass(signal.status)}">${statusLabel(signal.status)}</span>
                     <span>${signal.company}</span>
-                    <span>Lag: ${signal.confirmLagDays == null ? 'unconfirmed' : `${signal.confirmLagDays} day(s)`}</span>
+                    <span>Lead: ${leadTime}</span>
+                    <span class="mini-reason">${htmlEscape(topReason)}</span>
                   </div>
                 </div>
                 <div class="top-signal-score">
                   <div class="mini-confidence-bar" role="img" aria-label="confidence ${confidence} percent"><span style="width:${confidence}%"></span></div>
-                  <span>${confidence}%</span>
+                  <span class="top-signal-score-value">${confidence}%</span>
+                  <span class="top-signal-score-label">confidence</span>
                 </div>
               </div>
             `;
@@ -654,16 +1069,99 @@
           .join('');
 
         topSignalCompare.innerHTML = `
-          <h3>Top 3 confidence compare</h3>
+              <h3>Top 3 by confidence</h3>
           ${rows}
         `;
+      }
+
+      function renderDecisionRail(summary, signals) {
+        if (!decisionRailPanel || !decisionRailBody) return;
+
+        const statusBuckets = ['confirmed', 'likely', 'watching'].map((status) => ({
+          status,
+          label: status,
+          className: badgeClass(status),
+          items: (signals || []).filter((signal) => String(signal.status || 'watching') === status),
+        }));
+
+        const total = statusBuckets.reduce((acc, bucket) => acc + bucket.items.length, 0);
+        const bestByStatus = statusBuckets.map((bucket) => {
+          const top = bucket.items.sort((a, b) => (Number(b.confidence) || 0) - (Number(a.confidence) || 0))[0];
+          return {
+            ...bucket,
+            top,
+          };
+        });
+
+        const deltas = summary?.deltas || null;
+        const statusLine = bestByStatus
+          .map((bucket) => `${statusLabel(bucket.label)}: ${bucket.items.length}`)
+          .join(' · ');
+
+        decisionRailMode.textContent = `Run snapshot: ${total} total signals (${statusLine})`;
+        if (decisionRailCounts) {
+          decisionRailCounts.innerHTML = statusBuckets
+            .map((bucket) => `
+              <span class="rail-count-pill ${badgeClass(bucket.status)}">
+                ${statusLabel(bucket.label)} · ${bucket.items.length}
+                ${deltas ? trendChipWithPercent(deltas[bucket.status], statusLabel(bucket.label), bucket.items.length) : ''}
+              </span>
+            `)
+            .join('');
+        }
+        decisionRailPanel.classList.remove('hidden');
+
+        decisionRailBody.innerHTML = bestByStatus
+          .map((bucket) => {
+            if (!bucket.top) {
+            return `
+              <article class="rail-card rail-empty">
+                <div class="rail-card-head">
+                  <span class="pill ${bucket.className}">${statusLabel(bucket.label)}</span>
+                  <strong>0 signals</strong>
+                </div>
+                <p class="muted">No ${statusLabel(bucket.label).toLowerCase()} signals in this cycle.</p>
+                </article>
+              `;
+            }
+
+            const snippet = trimText(
+              bucket.top.officialSnippet || bucket.top.officialText || bucket.top.officialTitle || bucket.top.rumorText || bucket.top.rumorTitle || '',
+              145,
+            );
+            const sourceLabel = bucket.top.company || 'Unknown';
+            const confidence = Math.min(100, Math.max(0, Number(bucket.top.confidence) || 0));
+            const lag = formatLag(bucket.top.confirmLagDays);
+
+            return `
+              <article class="rail-card">
+                <div class="rail-card-head">
+                <span class="pill ${bucket.className}">${statusLabel(bucket.label)}</span>
+                  <strong>${confidence}%</strong>
+                </div>
+                <p class="rail-company">${htmlEscape(sourceLabel)} · Confidence score</p>
+                <p class="rail-snippet">${htmlEscape(snippet) || 'No snippet available.'}</p>
+                <div class="rail-meta">Lead time: ${htmlEscape(lag)} ${bucket.top.officialUrl ? `· <a href="${htmlEscape(bucket.top.officialUrl)}" target="_blank" rel="noreferrer">Open confirmation</a>` : ''}</div>
+                <div class="mini-confidence-bar" role="img" aria-label="confidence ${confidence} percent">
+                  <span style="width:${confidence}%"></span>
+                </div>
+              </article>
+            `;
+          })
+          .join('');
+
+        requestAnimationFrame(() => {
+          decisionRailBody.querySelectorAll('.rail-card, .rail-empty').forEach((card, index) => {
+            animateIn(card, index * 70);
+          });
+        });
       }
 
       function renderNarrative(summary, signals = []) {
         if (!narrativeText || !narrativePanel) return;
         narrativePanel.classList.remove('hidden');
         if (!summary) {
-          narrativeText.textContent = 'Waiting for scan data.';
+          narrativeText.textContent = 'Waiting on the latest scan snapshot.';
           return;
         }
         narrativeText.textContent = formatSummaryNarrative(summary, signals);
@@ -676,11 +1174,13 @@
           .map((signal, index) => {
             const confidence = Number(signal.confidence) || 0;
             const company = signal.company || 'Unknown';
-            const status = String(signal.status || 'watching').toUpperCase();
+            const status = statusLabel(signal.status);
             return `${index + 1}) ${company} - ${status} - ${confidence}% confidence`;
           });
 
-        const confidenceLine = topSignals.length ? `Top 3 signals:\n${topSignals.join('\n')}` : 'No signals in latest run.';
+        const confidenceLine = topSignals.length
+          ? `Top 3 signals by confidence:\n${topSignals.join('\n')}`
+          : 'No signals in latest run.';
         return `${topLine}\n${confidenceLine}\n\nGenerated: ${new Date().toLocaleString()}`;
       }
 
@@ -730,7 +1230,7 @@
 
       function officialWhyBlock(sig) {
         if (!sig.officialUrl || !sig.officialText) {
-          return '<div class="why muted">No matching official post yet.</div>';
+          return '<div class="why muted">No corroborating official post has landed yet.</div>';
         }
 
         const snippet = trimText(sig.officialSnippet || sig.officialText, 220);
@@ -763,11 +1263,12 @@
         renderTopSignalCompare(signals);
         renderOfficialSources(signals);
         renderNarrative(payload.summary || {}, signals);
+        renderDecisionRail(payload.summary || {}, signals);
 
         signalsEl.innerHTML = '';
 
-        if (!visibleSignals.length) {
-          const filterLabel = activeSignalFilter === 'all' ? 'No signals yet.' : `No ${activeSignalFilter} signals this run.`;
+          if (!visibleSignals.length) {
+          const filterLabel = activeSignalFilter === 'all' ? 'No signals available yet.' : `No ${activeSignalFilter} signals in this cycle.`;
           signalsEl.innerHTML = `<div class="empty">${filterLabel}</div>`;
         }
 
@@ -775,32 +1276,36 @@
           const confidence = Number(sig.confidence) || 0;
           const rumorLine = rumorTitleLine(sig);
           const rumorBody = rumorBodyLine(sig);
+          const status = String(sig.status || 'watching');
 
           const card = document.createElement('article');
           card.className = 'card';
+          card.dataset.status = status;
           card.innerHTML = `
             <header>
-              <strong>${sig.company}</strong>
-              <span class="pill ${badgeClass(sig.status)}">${sig.status}</span>
+              <div class="signal-title-group">
+                <strong>${sig.company}</strong>
+                <span class="signal-subtitle">Observed ${formatDate(sig.rumorAt)}</span>
+              </div>
+              <div class="signal-score-block">
+                <strong>${confidence}%</strong>
+                <span>${confidenceBand(confidence)} confidence</span>
+              </div>
+              <span class="pill ${badgeClass(status)}">${statusLabel(status)}</span>
             </header>
             <p class="title">${rumorLine}</p>
             ${rumorBody ? `<p class="meta">${rumorBody}</p>` : ''}
 
-            <div class="confidence">
-              <span>Confidence</span>
-              <strong>${confidence}%</strong>
-            </div>
             <div class="confidenceBar" role="img" aria-label="confidence ${confidence} percent">
               <span style="width:${confidence}%"></span>
             </div>
 
-            <div class="meta">Rumor seen: ${formatDate(sig.rumorAt)} · Confirm lag: ${sig.confirmLagDays == null ? 'unconfirmed' : `${sig.confirmLagDays} day(s)`}</div>
-            <div class="meta">Source: <a href="${sig.rumorUrl}" target="_blank" rel="noreferrer">rumor</a>${sig.officialUrl ? ` · Reality: <a href="${sig.officialUrl}" target="_blank" rel="noreferrer">official</a>` : ''}</div>
+            <div class="meta">Rumor posted: ${formatDate(sig.rumorAt)} · Lead time: ${formatLag(sig.confirmLagDays)}</div>
+            <div class="meta">Sources: <a href="${sig.rumorUrl}" target="_blank" rel="noreferrer">Rumor</a>${sig.officialUrl ? ` · <a href="${sig.officialUrl}" target="_blank" rel="noreferrer">Confirmation</a>` : ''}</div>
             <p class="why-label">Why this matched</p>
-            <ul class="reason-list">${sig.matchingReasons?.length ? listText(sig.matchingReasons) : '<li class="muted">No matching official post yet.</li>'}</ul>
+            <ul class="reason-list">${sig.matchingReasons?.length ? listText(sig.matchingReasons) : '<li class="muted">No matching official source yet.</li>'}</ul>
             ${officialWhyBlock(sig)}
             <div class="factor-row">${confidenceChipHtml(sig)}</div>
-            <p class="meta">${sig.confidenceSignals?.length ? `Confidence factors: ${sig.confidenceSignals.join(' · ')}` : 'Confidence factors: rumor context only'}</p>
           `;
           signalsEl.appendChild(card);
           animateIn(card, index * 55);
@@ -810,7 +1315,7 @@
         raw.slice(0, 40).forEach((d, index) => {
           const row = document.createElement('div');
           row.className = 'raw-item';
-          const sourceType = d.sourceType ? String(d.sourceType).toUpperCase() : 'SOURCE';
+          const sourceType = d.sourceType ? String(d.sourceType).toLowerCase().replace(/^\w/, (m) => m.toUpperCase()) : 'Source';
           const fullText = (d.text || d.title || '').toString().trim();
           const snippet = trimText(fullText, 220);
 
@@ -866,8 +1371,16 @@
 
       async function runScan() {
         let runId = startScanProgress();
-        setStatus('Running scan...', true);
+        setStatus('SCAN RUNNING...', true);
+        recordScanLog('info', 'initiated scan request', runId);
         setNotice('');
+        scanStartedAt = Date.now();
+        if (scanDurationEl) {
+          scanDurationEl.textContent = 'Scan running...';
+          scanDurationEl.classList.remove('hidden');
+          scanDurationEl.classList.remove('scan-duration-fail');
+          scanDurationEl.classList.add('scan-duration-run');
+        }
         if (scanBadge) {
           scanBadge.textContent = 'live';
         }
@@ -889,6 +1402,12 @@
           const payload = await res.json();
           endScanProgress(runId, res.ok && payload.ok);
           if (!res.ok || !payload.ok) {
+            recordScanLog('error', `scan request failed: ${payload?.error || 'unknown error'}`, runId);
+          }
+          if (payload && payload.ok) {
+            renderElasticSummary(payload, runId);
+          }
+          if (!res.ok || !payload.ok) {
             throw new Error(payload.error || 'Scan request failed');
           }
           lastKnownPayload = payload;
@@ -897,12 +1416,15 @@
           if (scanBadge) {
             scanBadge.textContent = 'ready';
           }
+          renderScanDuration(scanStartedAt, 'success');
           setStatus('Scan complete');
         } catch (error) {
           endScanProgress(runId, false);
+          recordScanLog('error', error?.message || 'scan failed', runId);
           if (scanBadge) {
             scanBadge.textContent = 'cached';
           }
+          renderScanDuration(scanStartedAt, 'failed');
           const fallback = lastKnownPayload;
           if (fallback) {
             render(fallback);
@@ -944,6 +1466,8 @@
       if (confirmRange) {
         confirmRange.addEventListener('input', () => {
           confirmRangeValue.textContent = confirmRange.value;
+          confirmRangeValue.classList.add('slider-value-pop');
+          setTimeout(() => confirmRangeValue.classList.remove('slider-value-pop'), 140);
           syncLikelyFloor();
         });
       }
@@ -953,21 +1477,29 @@
             likelyRange.value = String(Math.max(25, Number(confirmRange.value) - 5));
           }
           likelyRangeValue.textContent = likelyRange.value;
+          likelyRangeValue.classList.add('slider-value-pop');
+          setTimeout(() => likelyRangeValue.classList.remove('slider-value-pop'), 140);
         });
       }
       if (rumorPostsInput) {
         rumorPostsInput.addEventListener('input', () => {
           rumorPostsValue.textContent = rumorPostsInput.value;
+          rumorPostsValue.classList.add('slider-value-pop');
+          setTimeout(() => rumorPostsValue.classList.remove('slider-value-pop'), 140);
         });
       }
       if (officialPostsInput) {
         officialPostsInput.addEventListener('input', () => {
           officialPostsValue.textContent = officialPostsInput.value;
+          officialPostsValue.classList.add('slider-value-pop');
+          setTimeout(() => officialPostsValue.classList.remove('slider-value-pop'), 140);
         });
       }
       if (signalLimitInput) {
         signalLimitInput.addEventListener('input', () => {
           signalLimitValue.textContent = signalLimitInput.value;
+          signalLimitValue.classList.add('slider-value-pop');
+          setTimeout(() => signalLimitValue.classList.remove('slider-value-pop'), 140);
         });
       }
       statusFilterButtons.forEach((button) => {
@@ -979,6 +1511,11 @@
           }
         });
       });
+      presetButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          applyPreset(button.dataset.preset);
+        });
+      });
 
       if (scanBadge) {
         scanBadge.textContent = 'ready';
@@ -987,6 +1524,254 @@
       updateFilterUI();
 
       fetchLatest();
+    </script>
+    <script>
+      (function () {
+        const confidencePanel = document.getElementById('confidenceStrip');
+        const confidenceBars = document.getElementById('confidenceBars');
+        const runDigest = runDigestEl;
+        const filterButtonsByName = {
+          all: filterAllBtn,
+          confirmed: filterConfirmedBtn,
+          likely: filterLikelyBtn,
+          watching: filterWatchingBtn,
+        };
+
+        function renderConfidenceStrip(signals) {
+          if (!confidencePanel || !confidenceBars) return;
+          if (!Array.isArray(signals) || signals.length === 0) {
+            confidencePanel.classList.add('hidden');
+            confidenceBars.innerHTML = '';
+            return;
+          }
+
+          const buckets = [
+            { label: '0-49', count: 0 },
+            { label: '50-59', count: 0 },
+            { label: '60-69', count: 0 },
+            { label: '70-79', count: 0 },
+            { label: '80+', count: 0 },
+          ];
+
+          signals.forEach((signal) => {
+            const confidence = Number(signal?.confidence || 0);
+            let index = 4;
+            if (confidence < 50) index = 0;
+            else if (confidence < 60) index = 1;
+            else if (confidence < 70) index = 2;
+            else if (confidence < 80) index = 3;
+            buckets[index].count += 1;
+          });
+
+          const maxValue = Math.max(1, ...buckets.map((bucket) => bucket.count));
+          confidenceBars.innerHTML = '';
+          buckets.forEach((bucket, index) => {
+            const bar = document.createElement('div');
+            bar.className = 'confidence-bar';
+            bar.setAttribute('aria-label', `${bucket.label}: ${bucket.count}`);
+            bar.style.setProperty('--bar-value', `${Math.round((bucket.count / maxValue) * 100)}%`);
+            bar.style.setProperty('--bar-delay', `${index * 100}ms`);
+            bar.style.animationDelay = `${index * 100}ms`;
+            bar.innerHTML = `<span class="confidence-count">${bucket.count}</span>`;
+            confidenceBars.appendChild(bar);
+          });
+
+          confidencePanel.classList.remove('hidden');
+        }
+
+        function animateCards() {
+          const cards = document.querySelectorAll('#signals .card');
+          cards.forEach((card, idx) => {
+            card.style.setProperty('--stagger', `${Math.min(idx, 12) * 45}ms`);
+          });
+        }
+
+        function setActiveFilter(filterName) {
+          const next = filterButtonsByName[filterName] ? filterName : 'all';
+          activeSignalFilter = next;
+          Object.entries(filterButtonsByName).forEach(([name, button]) => {
+            if (!button) return;
+            button.classList.toggle('active', name === next);
+          });
+          if (typeof lastKnownPayload !== 'undefined' && lastKnownPayload) {
+            render(lastKnownPayload);
+          }
+        }
+
+        document.addEventListener('keydown', (event) => {
+          if (event.defaultPrevented) return;
+          if (event.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) return;
+
+          const key = event.key.toLowerCase();
+          if ((event.metaKey || event.ctrlKey) && key === 'r') {
+            event.preventDefault();
+            if (!scanBtn.disabled) scanBtn.click();
+            return;
+          }
+
+          if (key === 'r') {
+            event.preventDefault();
+            if (!refreshBtn.disabled) refreshBtn.click();
+            return;
+          }
+
+          if (key === 'h') {
+            event.preventDefault();
+            if (!healthBtn.disabled) healthBtn.click();
+            return;
+          }
+
+          if (key === '1') {
+            event.preventDefault();
+            setActiveFilter('confirmed');
+            return;
+          }
+          if (key === '2') {
+            event.preventDefault();
+            setActiveFilter('likely');
+            return;
+          }
+          if (key === '3') {
+            event.preventDefault();
+            setActiveFilter('watching');
+            return;
+          }
+          if (key === '0' || key === 'a') {
+            event.preventDefault();
+            setActiveFilter('all');
+          }
+        });
+
+        if (typeof window.render === 'function') {
+          const originalRender = window.render;
+          window.render = function (payload) {
+            const result = originalRender(payload);
+            const signals = Array.isArray(payload?.signals) ? payload.signals : [];
+            renderConfidenceStrip(signals);
+            animateCards();
+            if (runDigest && payload?.summary) {
+              const totalSignals = Number(payload.summary.totalSignals || 0);
+              const confirmed = payload.summary.confirmed || 0;
+              const likely = payload.summary.likely || 0;
+              const watching = statusLineFromSignals(signals).watching || 0;
+            const deltas = payload.summary.deltas || null;
+              const trendText = deltas
+                ? ` · vs last run: ${formatSigned(deltas.signals)} signals · ${formatSigned(deltas.confirmed)} confirmed · ${formatSigned(
+                    deltas.likely,
+                  )} likely · ${formatSigned(deltas.watching)} watching`
+                : '';
+              runDigest.classList.add('floating');
+              runDigest.textContent = `Latest scan: ${totalSignals} signals · ${confirmed} confirmed · ${likely} likely · ${watching} watching${trendText}`;
+            }
+            return result;
+          };
+        }
+
+        if (typeof lastKnownPayload !== 'undefined' && lastKnownPayload) {
+          render(lastKnownPayload);
+        }
+      })();
+    </script>
+    <script>
+      (function () {
+        const panel = document.getElementById('marketSignalsPanel');
+        const body = document.getElementById('marketSignalsBody');
+        if (!panel || !body) return;
+
+        function esc(value) {
+          return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+        }
+
+        function renderMarketSignals(data) {
+          if (!data || !data.ok) {
+            panel.classList.add('hidden');
+            return;
+          }
+          panel.classList.remove('hidden');
+
+          const days = (data.volumeByDay || []).filter((d) => d.count > 0);
+          const maxCount = Math.max(1, ...days.map((d) => d.count));
+              const sparkline = days
+            .map((d) => {
+              const h = Math.max(4, Math.round((d.count / maxCount) * 40));
+              const label = new Date(d.day).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+              return `<div class="spark-bar" title="${esc(label)}: ${d.count} rumor posts" style="height:${h}px"></div>`;
+            })
+            .join('');
+
+          const cp = data.changePoint;
+          let changePointHtml = '<div class="muted">Not enough history yet to detect a momentum shift.</div>';
+          if (cp && cp.type && cp.type !== 'stationary' && cp.type !== 'indeterminable') {
+            const when = cp.bucket?.key ? new Date(cp.bucket.key).toLocaleDateString() : 'recently';
+            changePointHtml = `<div class="change-point-alert">📈 Elasticsearch detected a <strong>${esc(cp.type)}</strong> in rumor volume around <strong>${esc(when)}</strong>.</div>`;
+          } else if (cp && cp.type === 'indeterminable') {
+            changePointHtml = `<div class="muted">Momentum analytics are collecting more daily buckets (${esc(cp.detail?.reason || 'collecting more history')}).</div>`;
+          }
+
+          const terms = (data.trendingTerms || [])
+            .slice(0, 10)
+            .map((t) => `<span class="factor-pill" title="significance score ${t.score}">${esc(t.term)}</span>`)
+            .join('') || '<span class="muted">No standout terms yet.</span>';
+
+          const companies = (data.companyActivity || [])
+            .map((c) => {
+              const total = Math.max(1, c.rumorCount + c.officialCount);
+              const rumorPct = Math.round((c.rumorCount / total) * 100);
+              const officialPct = Math.max(0, 100 - rumorPct);
+              return `
+                <div class="company-activity-row">
+                  <span class="company-activity-name">${esc(c.company)}</span>
+                  <div class="company-activity-bar"><span style="width:${rumorPct}%"></span></div>
+                  <span class="company-activity-count">${c.rumorCount} rumor posts (${rumorPct}%) · ${c.officialCount} official posts (${officialPct}%)</span>
+                </div>`;
+            })
+            .join('') || '<div class="muted">No company activity yet.</div>';
+
+          body.innerHTML = `
+            <div class="market-signals-grid">
+            <div class="market-signal-card">
+                <h3>Rumor volume trend</h3>
+                <div class="sparkline">${sparkline || '<span class="muted">No dated rumor volume yet.</span>'}</div>
+              </div>
+              <div class="market-signal-card">
+                <h3>Momentum shift detector</h3>
+                ${changePointHtml}
+              </div>
+              <div class="market-signal-card">
+                <h3>Trending rumor language</h3>
+                <div class="factor-row">${terms}</div>
+              </div>
+              <div class="market-signal-card">
+                <h3>Company activity</h3>
+                ${companies}
+              </div>
+            </div>
+          `;
+        }
+
+        async function fetchTrends() {
+          try {
+            const res = await fetch('/api/trends');
+            const data = await res.json();
+            renderMarketSignals(data);
+          } catch (error) {
+            panel.classList.add('hidden');
+          }
+        }
+
+        fetchTrends();
+
+        const scanBtnEl = document.getElementById('scanBtn');
+        if (scanBtnEl) {
+          scanBtnEl.addEventListener('click', () => {
+            setTimeout(fetchTrends, 4000);
+          });
+        }
+      })();
     </script>
 
   </body>

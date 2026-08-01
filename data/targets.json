@@ -16,6 +16,12 @@
         "postNestedReactions": false,
         "scrapeComments": false,
         "postNestedComments": false
+      },
+      "officialBlogActorId": "apify~website-content-crawler",
+      "officialBlogInput": {
+        "startUrls": [{ "url": "https://openai.com/news/" }],
+        "maxCrawlPages": 8,
+        "crawlerType": "cheerio"
       }
     },
     {
@@ -34,6 +40,12 @@
         "postNestedReactions": false,
         "scrapeComments": false,
         "postNestedComments": false
+      },
+      "officialBlogActorId": "apify~website-content-crawler",
+      "officialBlogInput": {
+        "startUrls": [{ "url": "https://stripe.com/newsroom" }],
+        "maxCrawlPages": 8,
+        "crawlerType": "cheerio"
       }
     },
     {
@@ -52,6 +64,12 @@
         "postNestedReactions": false,
         "scrapeComments": false,
         "postNestedComments": false
+      },
+      "officialBlogActorId": "apify~website-content-crawler",
+      "officialBlogInput": {
+        "startUrls": [{ "url": "https://www.anthropic.com/news" }],
+        "maxCrawlPages": 8,
+        "crawlerType": "cheerio"
       }
     }
   ]
